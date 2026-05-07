@@ -1,4 +1,4 @@
-# AGENT.md — epaper4j
+# AGENT.md — pux4j
 
 Canonical context document for AI agents working in this repository.
 `CLAUDE.md` and `.github/copilot-instructions.md` both reference this file. Read it first.
@@ -7,13 +7,13 @@ Canonical context document for AI agents working in this repository.
 
 ## What this project is
 
-`epaper4j` is an open-source Java 25 library for driving WaveShare eInk displays on
+`pux4j` is an open-source Java 25 library for driving WaveShare eInk displays on
 Raspberry Pi and integrating them with JavaFX applications.
 
 | Module | Purpose |
 |---|---|
-| `epaper4j-core` | Pi4J SPI/I2C hardware drivers for eInk displays and touch controllers; no JavaFX dependency |
-| `epaper4j-fx` | JavaFX bridge — intercepts scene rendering, pushes to the eInk display; translates touch events to `MouseEvent`s |
+| `pux4j-core` | Pi4J SPI/I2C hardware drivers for eInk displays and touch controllers; no JavaFX dependency |
+| `pux4j-fx` | JavaFX bridge — intercepts scene rendering, pushes to the eInk display; translates touch events to `MouseEvent`s |
 
 ## Supported hardware
 
@@ -28,7 +28,7 @@ Specific supported modules are documented in the individual driver README files.
 - **Java 25**, Foreign Function & Memory API (Project Panama) — no JNI
 - **Pi4J v4** with `pi4j-plugin-ffm` backend; SPI and I2C providers
 - **GraalVM native image** — AOT compilation for Raspberry Pi targets
-- **JavaFX** — `epaper4j-fx` module only
+- **JavaFX** — `pux4j-fx` module only
 - **Maven** multi-module build
 
 ## GraalVM native image notes
@@ -64,7 +64,7 @@ Key checks:
 - **FFM over JNI** — use the Foreign Function & Memory API for all hardware access.
 - **Pi4J as the hardware abstraction** — prefer Pi4J SPI/I2C providers; drop to raw FFM
   only if Pi4J cannot cover a specific low-level requirement.
-- **Hardware POC first** — `epaper4j-core` drivers must be working before `epaper4j-fx`
+- **Hardware POC first** — `pux4j-core` drivers must be working before `pux4j-fx`
   JavaFX bridge work begins.
 - **Interface-driven** — `EInkDisplay` and `TouchSensor` interfaces enable a virtual
   PNG-rendering driver for headless/CI testing without physical hardware.
