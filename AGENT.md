@@ -47,6 +47,18 @@ Cross-compiling from x86_64 to aarch64:
   - `captureCallState("errno")` prepends an extra `MemorySegment` to the stub signature;
     the registered descriptor must match.
 
+## Information Required protocol
+
+Before beginning implementation of any phase, check `notes/project-plan.md` in the parent
+`waveshare-integration-project` repository for the Information Required section of that
+phase. Verify each item is present on the current machine; ask if anything is missing.
+
+Key checks:
+- **DeepWiki MCP** — use to query Pi4J v4, JavaFX, and GraalVM APIs directly.
+  If not installed, flag it before beginning Phase 1.
+- **`red-amber-graal/`** — primary reference for Pi4J v4 FFM usage patterns.
+  Verify present and builds before any Pi4J driver work.
+
 ## Contributing guidelines
 
 - **FFM over JNI** — use the Foreign Function & Memory API for all hardware access.
@@ -56,3 +68,14 @@ Cross-compiling from x86_64 to aarch64:
   JavaFX bridge work begins.
 - **Interface-driven** — `EInkDisplay` and `TouchSensor` interfaces enable a virtual
   PNG-rendering driver for headless/CI testing without physical hardware.
+- **Logging** — all modules use SLF4J as the logging facade. No `System.out` or
+  `System.err` anywhere in production or test code. Runtime binding is Logback unless
+  there is a specific reason to change it.
+- **JPMS** — every module has `module-info.java` from the outset. Default to unexported;
+  only add `exports` when a package is deliberately part of the public API. Use
+  `ServiceLoader` (`provides`/`uses`) for runtime driver selection.
+- **Virtual threads** — prefer `Thread.ofVirtual()` for I/O-bound threads (display write,
+  touch polling). Note: FFM native calls may briefly pin a carrier thread; this is
+  acceptable for short-lived native operations.
+- **Minimum public API** — if it is not proven to be needed by another module, keep it
+  internal. It is easier to open things up later than to take them back.
