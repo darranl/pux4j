@@ -1,13 +1,52 @@
 #!/usr/bin/env bash
 # Run DisplaySmokeTest against the named driver (default: ssd1675a).
-# Must be executed from the pux4j-ui directory after 'mvn package -DskipTests'.
+# Auto-prepares runtime artifacts when missing.
 # Requires SPI and I2C enabled on the Pi (raspi-config → Interface Options).
 set -euo pipefail
 
 DRIVER=${1:-ssd1675a}
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+PROJECT_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 VALIDATION_JAR="$SCRIPT_DIR/target/pux4j-validation-0.1.0-SNAPSHOT.jar"
 LIB_DIR="$SCRIPT_DIR/target/run-lib"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./pux4j-validation/run-smoke-test.sh [driver]
+
+Arguments:
+  driver            Display driver factory name (default: ssd1675a)
+
+Environment:
+  SKIP_PREPARE=1    Skip auto-build/dependency preparation checks
+
+Notes:
+  - The script auto-builds pux4j-validation and copies runtime dependencies when missing.
+EOF
+}
+
+if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+prepare_if_needed() {
+  if [[ ${SKIP_PREPARE:-0} == "1" ]]; then
+    return
+  fi
+
+  if [[ ! -f "$VALIDATION_JAR" || ! -d "$LIB_DIR" ]]; then
+    echo "Preparing validation runtime artifacts..."
+    (
+      cd "$PROJECT_ROOT"
+      mvn -pl pux4j-validation -am -DskipTests package
+      mvn -pl pux4j-validation -DincludeScope=runtime dependency:copy-dependencies -DoutputDirectory=target/run-lib
+    )
+  fi
+}
+
+prepare_if_needed
 
 if [ ! -f "$VALIDATION_JAR" ]; then
   echo "ERROR: $VALIDATION_JAR not found — run 'mvn package -DskipTests' first"
