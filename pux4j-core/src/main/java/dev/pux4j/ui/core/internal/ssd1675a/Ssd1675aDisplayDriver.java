@@ -372,16 +372,23 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         }
     }
 
+    // Linux spidev default bufsiz = 4096 bytes; chunk large transfers to stay within it.
+    private static final int SPI_CHUNK = 4096;
+
     private void sendData(byte[] data) {
-        dc.state(DigitalState.HIGH);
-        spi.transfer(data);
+        sendData(data, 0, data.length);
     }
 
     private void sendData(byte[] data, int offset, int length) {
-        byte[] slice = new byte[length];
-        System.arraycopy(data, offset, slice, 0, length);
         dc.state(DigitalState.HIGH);
-        spi.transfer(slice);
+        int remaining = length;
+        int pos = offset;
+        while (remaining > 0) {
+            int chunk = Math.min(remaining, SPI_CHUNK);
+            spi.transfer(data, pos, chunk);
+            pos       += chunk;
+            remaining -= chunk;
+        }
     }
 
     private static void delay(long ms) {
