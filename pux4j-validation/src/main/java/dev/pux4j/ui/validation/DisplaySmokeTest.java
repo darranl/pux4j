@@ -46,20 +46,36 @@ public final class DisplaySmokeTest {
             log.info("DisplaySmokeTest: initialize");
             driver.initialize();
 
-            // Frame 1: checkerboard — alternating 0xAA / 0x55 rows
-            log.info("DisplaySmokeTest: write checkerboard frame");
-            byte[] checkerboard = new byte[FRAME_BYTES];
+            // Frame 1: top-half black, bottom-half white — clear boundary at midpoint
+            log.info("DisplaySmokeTest: write half-and-half frame (top=black, bottom=white)");
+            byte[] halfAndHalf = new byte[FRAME_BYTES];
+            int rowBytes = WIDTH / 8;
+            int midRow = HEIGHT / 2;
             for (int row = 0; row < HEIGHT; row++) {
-                byte fill = (row % 2 == 0) ? (byte)0xAA : 0x55;
-                for (int col = 0; col < WIDTH / 8; col++) {
-                    checkerboard[row * (WIDTH / 8) + col] = fill;
+                // 0x00 = black, 0xFF = white in SSD1675A bit encoding
+                byte fill = (row < midRow) ? (byte)0x00 : (byte)0xFF;
+                for (int col = 0; col < rowBytes; col++) {
+                    halfAndHalf[row * rowBytes + col] = fill;
                 }
             }
-            driver.writeFrame(new MonochromeFrame(checkerboard, RefreshMode.FULL)).get();
-            log.info("DisplaySmokeTest: checkerboard done, waiting 5s");
+            driver.writeFrame(new MonochromeFrame(halfAndHalf, RefreshMode.FULL)).get();
+            log.info("DisplaySmokeTest: half-and-half done, waiting 5s");
             Thread.sleep(5_000);
 
-            // Frame 2: all white (0xFF = white in the SSD1675A bit encoding)
+            // Frame 2: horizontal stripes (8 rows each) alternating black / white
+            log.info("DisplaySmokeTest: write horizontal-stripes frame");
+            byte[] stripes = new byte[FRAME_BYTES];
+            for (int row = 0; row < HEIGHT; row++) {
+                byte fill = ((row / 8) % 2 == 0) ? (byte)0x00 : (byte)0xFF;
+                for (int col = 0; col < rowBytes; col++) {
+                    stripes[row * rowBytes + col] = fill;
+                }
+            }
+            driver.writeFrame(new MonochromeFrame(stripes, RefreshMode.FULL)).get();
+            log.info("DisplaySmokeTest: stripes done, waiting 5s");
+            Thread.sleep(5_000);
+
+            // Frame 3: all white (0xFF = white in the SSD1675A bit encoding)
             log.info("DisplaySmokeTest: write all-white frame");
             byte[] allWhite = new byte[FRAME_BYTES];
             java.util.Arrays.fill(allWhite, (byte)0xFF);
