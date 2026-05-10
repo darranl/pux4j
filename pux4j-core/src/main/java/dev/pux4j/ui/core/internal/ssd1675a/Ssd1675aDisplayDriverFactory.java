@@ -1,0 +1,17 @@
+// SPDX-License-Identifier: Apache-2.0
+package dev.pux4j.ui.core.internal.ssd1675a;
+
+import dev.pux4j.ui.core.DisplayDriverFactory;
+import dev.pux4j.ui.core.DriverConfig;
+import dev.pux4j.ui.core.EInkDisplayDriver;
+
+public final class Ssd1675aDisplayDriverFactory implements DisplayDriverFactory {
+
+    @Override
+    public String name() { return "ssd1675a"; }
+
+    @Override
+    public EInkDisplayDriver create(DriverConfig config) {
+        return new Ssd1675aDisplayDriver(config);
+    }
+}

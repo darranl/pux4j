@@ -10,5 +10,9 @@ module dev.pux4j.ui.core {
     uses dev.pux4j.ui.core.TouchDriverFactory;
 
     provides dev.pux4j.ui.core.DisplayDriverFactory
-        with dev.pux4j.ui.core.internal.PngDisplayDriverFactory;
+        with dev.pux4j.ui.core.internal.PngDisplayDriverFactory,
+             dev.pux4j.ui.core.internal.ssd1675a.Ssd1675aDisplayDriverFactory;
+
+    provides dev.pux4j.ui.core.TouchDriverFactory
+        with dev.pux4j.ui.core.internal.icnt86x.Icnt86xTouchDriverFactory;
 }
