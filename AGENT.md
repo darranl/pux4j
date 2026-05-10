@@ -49,9 +49,13 @@ Cross-compiling from x86_64 to aarch64:
 
 ## Information Required protocol
 
-Before beginning implementation of any phase, check `notes/project-plan.md` in the parent
-`waveshare-integration-project` repository for the Information Required section of that
-phase. Verify each item is present on the current machine; ask if anything is missing.
+This repository must remain standalone and publicly usable. Do not assume any parent
+repository exists.
+
+Before beginning implementation of substantial work, verify required references and tooling
+from files in this repository (for example `README.md`, module docs, and issue/PR context).
+If this repository happens to be checked out inside another project with additional planning
+documents, treat those as optional supplemental context only.
 
 Key checks:
 - **DeepWiki MCP** — use to query Pi4J v4, JavaFX, and GraalVM APIs directly.
