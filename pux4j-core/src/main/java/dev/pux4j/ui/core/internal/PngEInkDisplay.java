@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package dev.pux4j.ui.core.internal;
 
 import dev.pux4j.ui.core.AlignmentConstraints;

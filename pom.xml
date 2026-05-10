@@ -12,6 +12,14 @@
     <name>pux4j :: Parent</name>
     <description>Pi User Experience for Java — eInk display and touch library for Raspberry Pi</description>
 
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
     <modules>
         <module>pux4j-core</module>
         <module>pux4j-transform</module>
