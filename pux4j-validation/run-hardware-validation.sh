@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run the interactive 10-step hardware validation test.
+# Run the interactive hardware validation test.
 # Defaults to the Pi 500+ 2.9" V2 profile; no extra flags required.
 set -euo pipefail
 
@@ -21,15 +21,20 @@ Profiles:
 Examples:
   ./pux4j-validation/run-hardware-validation.sh
   ./pux4j-validation/run-hardware-validation.sh pi500-2in9
+  ./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --scenario-count 4
+  ./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --all-scenarios
+  ./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --use-partial-prompts
   ./pux4j-validation/run-hardware-validation.sh custom -- --display ssd1675a --touch icnt86x --orientation LANDSCAPE
   ./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --notes "pi500 baseline run"
 
 Environment:
   VALIDATION_PROFILE   Default profile when not passed on CLI (default: pi500-2in9)
   SKIP_PREPARE=1       Skip auto-build/dependency prepare checks
+  FORCE_PREPARE=1      Force rebuild and dependency refresh before run
 
 Notes:
-  - The script auto-builds pux4j-validation and copies runtime dependencies when missing.
+  - The script auto-builds pux4j-validation and refreshes runtime dependencies when artifacts are missing or stale.
+  - HardwareValidationTest defaults to 2 scenarios for stabilization.
   - Extra arguments after '--' are passed directly to HardwareValidationTest.
 EOF
 }
@@ -60,8 +65,8 @@ case "$PROFILE" in
       --display ssd1675a
       --touch icnt86x
       --orientation LANDSCAPE
-      --touch-native-width 4096
-      --touch-native-height 4096
+      --touch-native-width 296
+      --touch-native-height 128
     )
     ;;
   little-2in13)
@@ -86,7 +91,18 @@ prepare_if_needed() {
     return
   fi
 
-  if [[ ! -f "$VALIDATION_JAR" || ! -d "$LIB_DIR" ]]; then
+  local should_prepare=0
+  if [[ ${FORCE_PREPARE:-0} == "1" ]]; then
+    should_prepare=1
+  elif [[ ! -f "$VALIDATION_JAR" || ! -d "$LIB_DIR" ]]; then
+    should_prepare=1
+  elif find "$SCRIPT_DIR/src/main" -type f -newer "$VALIDATION_JAR" | grep -q .; then
+    should_prepare=1
+  elif [[ "$SCRIPT_DIR/pom.xml" -nt "$VALIDATION_JAR" || "$PROJECT_ROOT/pom.xml" -nt "$VALIDATION_JAR" ]]; then
+    should_prepare=1
+  fi
+
+  if [[ $should_prepare -eq 1 ]]; then
     echo "Preparing validation runtime artifacts..."
     (
       cd "$PROJECT_ROOT"

@@ -9,6 +9,8 @@ Interactive and scripted validation tools for pux4j hardware driver bring-up.
 
 Both tools run via JPMS and ServiceLoader driver factories from pux4j-core.
 
+Icon attribution and previews are documented in [src/main/resources/icons/ATTRIBUTION.md](src/main/resources/icons/ATTRIBUTION.md).
+
 ## Available tests
 
 ### 1) DisplaySmokeTest
@@ -39,7 +41,9 @@ Show script help:
 
 Purpose:
 - Full interactive acceptance test for display + touch mapping.
-- Uses instruction/challenge/feedback phases across 10 steps.
+- Uses instruction/challenge/feedback phases.
+- Default run executes the first 2 scenarios for stabilization.
+- Additional scenarios can be enabled incrementally.
 - Writes a validation report file in the working directory:
   - validation-report-YYYYMMDD-HHMMSS.txt
 
@@ -61,6 +65,8 @@ Profiles:
   - display=ssd1675a
   - touch=icnt86x
   - orientation=LANDSCAPE
+  - touch-native-width=296
+  - touch-native-height=128
 - little-2in13:
   - display=ssd1680
   - touch=gt1151q
@@ -80,13 +86,22 @@ Examples:
 # Add notes to report
 ./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --notes "baseline calibration run"
 
+# Run first 4 scenarios
+./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --scenario-count 4
+
+# Run all available scenarios
+./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --all-scenarios
+
+# Enable partial-refresh prompts (default is full refresh prompts)
+./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --use-partial-prompts
+
 # Fully custom invocation
 ./pux4j-validation/run-hardware-validation.sh custom -- \
   --display ssd1675a \
   --touch icnt86x \
   --orientation LANDSCAPE \
-  --touch-native-width 4096 \
-  --touch-native-height 4096 \
+  --touch-native-width 296 \
+  --touch-native-height 128 \
   --flip-x
 ```
 
@@ -101,7 +116,7 @@ From repository root (pux4j-ui):
 
 ```bash
 mvn -pl pux4j-validation -am -DskipTests package
-mvn -pl pux4j-validation -DincludeScope=runtime dependency:copy-dependencies -DoutputDirectory=pux4j-validation/target/run-lib
+mvn -pl pux4j-validation -DincludeScope=runtime dependency:copy-dependencies -DoutputDirectory=target/run-lib
 ```
 
 Then run:
@@ -109,9 +124,18 @@ Then run:
 ./pux4j-validation/run-hardware-validation.sh
 ```
 
+The launcher scripts refresh artifacts automatically when module sources/resources are newer than the built JAR.
+To force refresh manually:
+
+```bash
+FORCE_PREPARE=1 ./pux4j-validation/run-hardware-validation.sh
+FORCE_PREPARE=1 ./pux4j-validation/run-smoke-test.sh
+```
+
 Note:
 - Both run scripts auto-run build/dependency preparation when artifacts are missing.
 - If you prefer to skip this auto-prepare behavior, set SKIP_PREPARE=1.
+- Hardware validation defaults to 2 scenarios for stability; use `--scenario-count` or `--all-scenarios` to expand coverage.
 
 ## Native access requirement
 

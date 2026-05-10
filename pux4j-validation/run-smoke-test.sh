@@ -20,9 +20,10 @@ Arguments:
 
 Environment:
   SKIP_PREPARE=1    Skip auto-build/dependency preparation checks
+  FORCE_PREPARE=1   Force rebuild and dependency refresh before run
 
 Notes:
-  - The script auto-builds pux4j-validation and copies runtime dependencies when missing.
+  - The script auto-builds pux4j-validation and refreshes runtime dependencies when artifacts are missing or stale.
 EOF
 }
 
@@ -36,7 +37,18 @@ prepare_if_needed() {
     return
   fi
 
-  if [[ ! -f "$VALIDATION_JAR" || ! -d "$LIB_DIR" ]]; then
+  local should_prepare=0
+  if [[ ${FORCE_PREPARE:-0} == "1" ]]; then
+    should_prepare=1
+  elif [[ ! -f "$VALIDATION_JAR" || ! -d "$LIB_DIR" ]]; then
+    should_prepare=1
+  elif find "$SCRIPT_DIR/src/main" -type f -newer "$VALIDATION_JAR" | grep -q .; then
+    should_prepare=1
+  elif [[ "$SCRIPT_DIR/pom.xml" -nt "$VALIDATION_JAR" || "$PROJECT_ROOT/pom.xml" -nt "$VALIDATION_JAR" ]]; then
+    should_prepare=1
+  fi
+
+  if [[ $should_prepare -eq 1 ]]; then
     echo "Preparing validation runtime artifacts..."
     (
       cd "$PROJECT_ROOT"

@@ -24,13 +24,10 @@ import org.slf4j.LoggerFactory;
 import java.util.EnumSet;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 
 final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
 
     private static final Logger log = LoggerFactory.getLogger(Ssd1675aDisplayDriver.class);
-    private static final Executor VTHREAD = task -> Thread.ofVirtual().start(task);
-
     static final int WIDTH        = 128;
     static final int HEIGHT       = 296;
     static final int BYTES_PER_ROW = WIDTH / 8;
@@ -124,6 +121,7 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     private final DigitalOutput dc;
     private final DigitalOutput rst;
     private final DigitalInput  busy;
+    private boolean fullModeConfigured;
 
     Ssd1675aDisplayDriver(DriverConfig config) {
         var ctx  = config.pi4j();
@@ -179,14 +177,7 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         hardwareReset();
         delay(100);
         waitBusy();
-        sendCommand(CMD_SW_RESET);
-        waitBusy();
-
-        sendCommand(CMD_DRIVER_OUTPUT,   (byte)0x27, (byte)0x01, (byte)0x00);
-        sendCommand(CMD_DATA_ENTRY_MODE, (byte)0x03);
-        setFullWindow();
-        sendCommand(CMD_DISP_UPDATE_1,   (byte)0x00, (byte)0x80);
-        waitBusy();
+        configureFullRefreshMode();
         log.debug("SSD1675A: initialized");
     }
 
@@ -234,6 +225,7 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
             throw new UnsupportedOperationException("Unsupported frame type: " + frame.getClass());
         }
         log.debug("SSD1675A: writeRegion ({},{}) {}x{}", x, y, width, height);
+        waitBusy();
         partialInit();
         setWindow(x, y, x + width - 1, y + height - 1);
         setCursor(x, y);
@@ -241,34 +233,43 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         sendData(mf.data());
         sendCommand(CMD_DISP_UPDATE_2, (byte)0x0F);
         sendCommand(CMD_ACTIVATE);
-        return CompletableFuture.runAsync(this::waitBusy, VTHREAD);
+        waitBusy();
+        return CompletableFuture.completedFuture(null);
     }
 
     // --- Frame write helpers ---
 
     private CompletableFuture<Void> writeFullFrame(byte[] data) {
         log.debug("SSD1675A: full-refresh frame ({} bytes)", data.length);
+        waitBusy();
+        if (!fullModeConfigured) {
+            configureFullRefreshMode();
+        }
         setFullWindow();
         sendCommand(CMD_WRITE_BW_RAM);
         sendData(data);
         sendCommand(CMD_DISP_UPDATE_2, (byte)0xF7);
         sendCommand(CMD_ACTIVATE);
-        return CompletableFuture.runAsync(this::waitBusy, VTHREAD);
+        waitBusy();
+        return CompletableFuture.completedFuture(null);
     }
 
     private CompletableFuture<Void> writePartialFrame(byte[] data) {
         log.debug("SSD1675A: partial-refresh frame ({} bytes)", data.length);
+        waitBusy();
         partialInit();
         setFullWindow();
         sendCommand(CMD_WRITE_BW_RAM);
         sendData(data);
         sendCommand(CMD_DISP_UPDATE_2, (byte)0x0F);
         sendCommand(CMD_ACTIVATE);
-        return CompletableFuture.runAsync(this::waitBusy, VTHREAD);
+        waitBusy();
+        return CompletableFuture.completedFuture(null);
     }
 
     private CompletableFuture<Void> writeFourGrayFrame(FourGrayFrame frame) {
         log.debug("SSD1675A: 4-gray frame");
+        waitBusy();
         fourGrayInit();
         sendCommand(CMD_WRITE_BW_RAM);
         sendData(frame.bwPlane());
@@ -277,13 +278,15 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         sendData(frame.redPlane());
         sendCommand(CMD_DISP_UPDATE_2, (byte)0xC7);
         sendCommand(CMD_ACTIVATE);
-        return CompletableFuture.runAsync(this::waitBusy, VTHREAD);
+        waitBusy();
+        return CompletableFuture.completedFuture(null);
     }
 
     // --- Init sequences ---
 
     private void partialInit() {
         log.debug("SSD1675A: partialInit");
+        fullModeConfigured = false;
         rst.state(DigitalState.LOW);
         delay(1);
         rst.state(DigitalState.HIGH);
@@ -303,6 +306,7 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
 
     private void fourGrayInit() {
         log.debug("SSD1675A: fourGrayInit");
+        fullModeConfigured = false;
         hardwareReset();
         waitBusy();
         sendCommand(CMD_SW_RESET);
@@ -327,6 +331,17 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         sendCommand(CMD_VCOM,           GRAY4_LUT[158]);
     }
 
+    private void configureFullRefreshMode() {
+        sendCommand(CMD_SW_RESET);
+        waitBusy();
+        sendCommand(CMD_DRIVER_OUTPUT,   (byte)0x27, (byte)0x01, (byte)0x00);
+        sendCommand(CMD_DATA_ENTRY_MODE, (byte)0x03);
+        setFullWindow();
+        sendCommand(CMD_DISP_UPDATE_1,   (byte)0x00, (byte)0x80);
+        waitBusy();
+        fullModeConfigured = true;
+    }
+
     // --- SPI and GPIO helpers ---
 
     private void hardwareReset() {
@@ -339,6 +354,11 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     }
 
     private void waitBusy() {
+        while (busy.isHigh()) {
+            delay(10);
+        }
+        // BUSY can briefly deassert between internal phases; require stable idle.
+        delay(20);
         while (busy.isHigh()) {
             delay(10);
         }

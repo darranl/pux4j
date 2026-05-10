@@ -1,2 +1,3 @@
 target/
 *.class
+pux4j-validation/validation-report-*.txt

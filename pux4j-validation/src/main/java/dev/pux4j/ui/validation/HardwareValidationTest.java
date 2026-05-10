@@ -17,6 +17,7 @@ import jakarta.json.Json;
 import jakarta.json.JsonObjectBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import javax.imageio.ImageIO;
 
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -28,6 +29,7 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,10 +37,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Collections;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.ServiceLoader;
 
@@ -52,7 +57,14 @@ public final class HardwareValidationTest {
 
     private static final int TOUCH_TOLERANCE_PX = 10;
     private static final Duration INSTRUCTION_HINT_TIMEOUT = Duration.ofSeconds(5);
-    private static final Duration FEEDBACK_HINT_TIMEOUT = Duration.ofSeconds(3);
+    private static final Duration FEEDBACK_HINT_TIMEOUT = Duration.ofMillis(1400);
+    private static final Duration TOUCH_RELEASE_TIMEOUT = Duration.ofMillis(700);
+    private static final Duration TOUCH_RELEASE_STABLE_PERIOD = Duration.ofMillis(220);
+    private static final Duration TOUCH_ARM_TIMEOUT = Duration.ofMillis(900);
+    private static final Duration TOUCH_ARM_STABLE_PERIOD = Duration.ofMillis(160);
+    private static final Duration DISPLAY_SETTLE_AFTER_REFRESH = Duration.ofMillis(220);
+    private static final Duration COMPLETION_MIN_DWELL = Duration.ofMillis(3500);
+    private static final Duration COMPLETION_EXTRA_DWELL = Duration.ofMillis(5000);
     private static final Duration TOUCH_POLL_INTERVAL = Duration.ofMillis(25);
 
     private HardwareValidationTest() {}
@@ -98,18 +110,34 @@ public final class HardwareValidationTest {
             var renderer = new Renderer(framebufferWidth, framebufferHeight, logicalWidth, logicalHeight, options.orientation);
             var touchPoller = new TouchPoller(touch, mapper);
 
-            var steps = ValidationStepFactory.build(logicalWidth, logicalHeight);
+            var allSteps = ValidationStepFactory.build(logicalWidth, logicalHeight);
+            int selectedScenarioCount = Math.max(1, Math.min(options.scenarioCount, allSteps.size()));
+            var steps = allSteps.subList(0, selectedScenarioCount);
             var results = new ArrayList<StepResult>(steps.size());
+            int passedSoFar = 0;
+            int failedSoFar = 0;
+
+            log.info("Executing {} of {} available scenarios (use --scenario-count or --all-scenarios to change)",
+                selectedScenarioCount, allSteps.size());
 
             for (int i = 0; i < steps.size(); i++) {
                 var step = steps.get(i);
                 int stepNumber = i + 1;
                 log.info("Step {}: {}", stepNumber, step.instructionText);
 
-                showInstructionPhase(display, renderer, touchPoller, stepNumber, steps.size(), step.instructionText);
+                showInstructionPhase(display, renderer, touchPoller, stepNumber, steps.size(), passedSoFar, failedSoFar,
+                    step.instructionText,
+                    options.usePartialPrompts);
 
-                var challengeImage = renderer.renderChallenge(stepNumber, steps.size(), step.instructionText, step.items);
+                var challengeImage = renderer.renderChallenge(stepNumber, steps.size(), step.instructionText, step.items,
+                    passedSoFar, failedSoFar);
+                log.info("PHASE step={} challenge: rendering challenge screen", stepNumber);
                 renderer.writeFull(display, challengeImage);
+                log.info("PHASE step={} challenge: challenge rendered; waiting for stable touch release", stepNumber);
+                TouchPoller.sleep(DISPLAY_SETTLE_AFTER_REFRESH);
+                touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
+                touchPoller.waitForIdle(TOUCH_ARM_TIMEOUT, TOUCH_ARM_STABLE_PERIOD);
+                log.info("PHASE step={} challenge: armed and waiting for answer tap", stepNumber);
 
                 var challengeStart = Instant.now();
                 var touchPoint = touchPoller.waitForTap();
@@ -124,7 +152,7 @@ public final class HardwareValidationTest {
                     touchPoint.y(),
                     match.map(item -> item.name).orElse("none"));
 
-                showFeedbackPhase(display, renderer, touchPoller, stepNumber, steps.size(), step, pass);
+                showFeedbackPhase(display, renderer, challengeImage, step, pass);
 
                 var expected = step.expectedRegion();
                 var result = new StepResult(
@@ -138,15 +166,24 @@ public final class HardwareValidationTest {
                 );
                 results.add(result);
                 reportWriter.append(result);
+                if (pass) {
+                    passedSoFar++;
+                } else {
+                    failedSoFar++;
+                }
             }
 
             long passed = results.stream().filter(StepResult::pass).count();
             int failed = results.size() - (int) passed;
             reportWriter.finish((int) passed, failed);
 
-            var summaryImage = renderer.renderSummary((int) passed, failed, reportWriter.outputPath());
-            renderer.writeFull(display, summaryImage);
-            waitForTapWithPrompt(display, renderer, touchPoller, summaryImage, Duration.ofSeconds(5), "Tap to finish");
+            var completionImage = renderer.renderCompletionScreen((int) passed, failed, reportWriter.outputPath());
+            log.info("Rendering completion screen (pass={}, fail={})", passed, failed);
+            renderer.writeFull(display, completionImage);
+            log.info("PHASE completion: completion screen rendered; starting minimum dwell {} ms", COMPLETION_MIN_DWELL.toMillis());
+            TouchPoller.sleep(COMPLETION_MIN_DWELL);
+            log.info("PHASE completion: extending completion dwell {} ms", COMPLETION_EXTRA_DWELL.toMillis());
+            TouchPoller.sleep(COMPLETION_EXTRA_DWELL);
 
             log.info("Validation complete: passed={} failed={} report={}", passed, failed, reportWriter.outputPath());
         } catch (Exception e) {
@@ -176,22 +213,35 @@ public final class HardwareValidationTest {
                                              TouchPoller touchPoller,
                                              int step,
                                              int total,
-                                             String instruction) {
-        var image = renderer.renderInstruction(step, total, instruction);
+                                             int passed,
+                                             int failed,
+                                             String instruction,
+                                             boolean usePartialPrompts) {
+        log.info("PHASE step={} instruction: preparing instruction screen", step);
+        touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
+        touchPoller.waitForIdle(TOUCH_ARM_TIMEOUT, TOUCH_ARM_STABLE_PERIOD);
+        var image = renderer.renderInstruction(step, total, instruction, passed, failed);
         renderer.writeFull(display, image);
-        waitForTapWithPrompt(display, renderer, touchPoller, image, INSTRUCTION_HINT_TIMEOUT, "Tap to advance");
+        log.info("PHASE step={} instruction: instruction rendered; waiting for proceed tap (hint timeout {} ms)",
+            step, INSTRUCTION_HINT_TIMEOUT.toMillis());
+        TouchPoller.sleep(DISPLAY_SETTLE_AFTER_REFRESH);
+        waitForTapWithPrompt(display, renderer, touchPoller, image, INSTRUCTION_HINT_TIMEOUT, "Tap to advance",
+            usePartialPrompts);
+        log.info("PHASE step={} instruction: proceed tap received", step);
     }
 
     private static void showFeedbackPhase(EInkDisplayDriver display,
                                           Renderer renderer,
-                                          TouchPoller touchPoller,
-                                          int step,
-                                          int total,
+                                          BufferedImage challengeImage,
                                           ValidationStep validationStep,
                                           boolean pass) {
-        var image = renderer.renderFeedback(step, total, validationStep, pass);
-        renderer.writeFull(display, image);
-        waitForTapWithPrompt(display, renderer, touchPoller, image, FEEDBACK_HINT_TIMEOUT, "Tap to advance");
+        log.info("PHASE feedback: rendering {} overlay", pass ? "PASS" : "FAIL");
+        var overlays = renderer.drawChallengeFeedbackOverlay(challengeImage, validationStep.correctItemBounds(), pass);
+        for (var overlay : overlays) {
+            renderer.writeRegion(display, challengeImage, overlay.x, overlay.y, overlay.width, overlay.height);
+        }
+        log.info("PHASE feedback: overlay rendered; holding {} ms before next step", FEEDBACK_HINT_TIMEOUT.toMillis());
+        TouchPoller.sleep(FEEDBACK_HINT_TIMEOUT);
     }
 
     private static void waitForTapWithPrompt(EInkDisplayDriver display,
@@ -199,17 +249,30 @@ public final class HardwareValidationTest {
                                              TouchPoller touchPoller,
                                              BufferedImage currentImage,
                                              Duration initialTimeout,
-                                             String prompt) {
+                                             String prompt,
+                                             boolean usePartialPrompts) {
+        touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
+        touchPoller.waitForIdle(TOUCH_ARM_TIMEOUT, TOUCH_ARM_STABLE_PERIOD);
+        log.info("PHASE instruction-wait: waiting for tap for up to {} ms", initialTimeout.toMillis());
         Optional<TouchPoint> touch = touchPoller.waitForTap(initialTimeout);
         if (touch.isPresent()) {
+            log.info("PHASE instruction-wait: tap received before prompt");
             return;
         }
 
+        log.info("PHASE instruction-wait: timeout reached; rendering prompt '{}'; waiting indefinitely", prompt);
         int promptHeight = Math.max(20, renderer.logicalHeight() / 8);
         int promptY = renderer.logicalHeight() - promptHeight;
         renderer.drawPrompt(currentImage, promptY, promptHeight, prompt);
-        renderer.writeRegion(display, currentImage, 0, promptY, renderer.logicalWidth(), promptHeight);
+        if (usePartialPrompts) {
+            renderer.writeRegion(display, currentImage, 0, promptY, renderer.logicalWidth(), promptHeight);
+        } else {
+            renderer.writeFull(display, currentImage);
+        }
+        touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
+        touchPoller.waitForIdle(TOUCH_ARM_TIMEOUT, TOUCH_ARM_STABLE_PERIOD);
         touchPoller.waitForTap();
+        log.info("PHASE instruction-wait: tap received after prompt");
     }
 
     private static DriverConfig createDriverConfig(Context pi4j, Options options) {
@@ -271,6 +334,8 @@ public final class HardwareValidationTest {
         int touchI2cAddress,
         int touchRstPin,
         int touchIntPin,
+        int scenarioCount,
+        boolean usePartialPrompts,
         String notes
     ) {
         private static Options parse(String[] args) {
@@ -288,6 +353,8 @@ public final class HardwareValidationTest {
             int touchI2cAddress = 0x48;
             int touchRstPin = 22;
             int touchIntPin = 27;
+            int scenarioCount = 2;
+            boolean usePartialPrompts = false;
             String notes = "";
 
             for (int i = 0; i < args.length; i++) {
@@ -310,6 +377,9 @@ public final class HardwareValidationTest {
                     }
                     case "--touch-rst-pin" -> touchRstPin = Integer.parseInt(requireValue(args, ++i, arg));
                     case "--touch-int-pin" -> touchIntPin = Integer.parseInt(requireValue(args, ++i, arg));
+                    case "--scenario-count" -> scenarioCount = Integer.parseInt(requireValue(args, ++i, arg));
+                    case "--all-scenarios" -> scenarioCount = Integer.MAX_VALUE;
+                    case "--use-partial-prompts" -> usePartialPrompts = true;
                     case "--notes" -> notes = requireValue(args, ++i, arg);
                     default -> throw new IllegalArgumentException("Unknown argument: " + arg);
                 }
@@ -330,6 +400,8 @@ public final class HardwareValidationTest {
                 touchI2cAddress,
                 touchRstPin,
                 touchIntPin,
+                scenarioCount,
+                usePartialPrompts,
                 notes
             );
         }
@@ -398,6 +470,38 @@ public final class HardwareValidationTest {
             return Optional.empty();
         }
 
+        private void waitForRelease(Duration timeout, Duration stableDuration) {
+            waitForIdle(timeout, stableDuration);
+            lastAnyDown = false;
+        }
+
+        private boolean waitForIdle(Duration timeout, Duration stableDuration) {
+            Instant deadline = Instant.now().plus(timeout);
+            Instant stableSince = null;
+
+            while (Instant.now().isBefore(deadline)) {
+                boolean anyDown = false;
+                var points = touchDriver.readTouches();
+                for (var point : points) {
+                    if (point.down()) {
+                        anyDown = true;
+                        break;
+                    }
+                }
+
+                if (anyDown) {
+                    stableSince = null;
+                } else if (stableSince == null) {
+                    stableSince = Instant.now();
+                } else if (Duration.between(stableSince, Instant.now()).compareTo(stableDuration) >= 0) {
+                    return true;
+                }
+
+                sleep(TOUCH_POLL_INTERVAL);
+            }
+            return false;
+        }
+
         private static void sleep(Duration duration) {
             try {
                 Thread.sleep(duration.toMillis());
@@ -439,11 +543,11 @@ public final class HardwareValidationTest {
             return logicalHeight;
         }
 
-        private BufferedImage renderInstruction(int step, int total, String instruction) {
+        private BufferedImage renderInstruction(int step, int total, String instruction, int passed, int failed) {
             var image = blankCanvas();
             var g = graphics(image);
             try {
-                drawHeader(g, "Step " + step + " / " + total, "Instruction");
+                drawHeader(g, "Step " + step + " / " + total, "Instruction", passed, failed);
                 drawWrappedCentered(g, instruction, logicalHeight / 2 - 10, 20, true);
                 drawCenteredText(g, "Tap anywhere to continue", logicalHeight - 14, false);
             } finally {
@@ -452,11 +556,16 @@ public final class HardwareValidationTest {
             return image;
         }
 
-        private BufferedImage renderChallenge(int step, int total, String instruction, List<ChallengeItem> items) {
+        private BufferedImage renderChallenge(int step,
+                                              int total,
+                                              String instruction,
+                                              List<ChallengeItem> items,
+                                              int passed,
+                                              int failed) {
             var image = blankCanvas();
             var g = graphics(image);
             try {
-                drawHeader(g, "Step " + step + " / " + total, instruction);
+                drawHeader(g, "Step " + step + " / " + total, instruction, passed, failed);
                 for (var item : items) {
                     item.renderer.render(g, item.bounds);
                 }
@@ -466,30 +575,118 @@ public final class HardwareValidationTest {
             return image;
         }
 
-        private BufferedImage renderFeedback(int step, int total, ValidationStep validationStep, boolean pass) {
+        private List<Rectangle> drawChallengeFeedbackOverlay(BufferedImage challengeImage,
+                                                             Rectangle correctBounds,
+                                                             boolean pass) {
+            var g = graphics(challengeImage);
+            try {
+                g.setStroke(new BasicStroke(2f));
+                int centerX = correctBounds.x + (correctBounds.width / 2);
+                int topReserved = 34;
+                int bottomReserved = 6;
+                int availableAbove = Math.max(0, correctBounds.y - topReserved);
+                int availableBelow = Math.max(0, (logicalHeight - bottomReserved) - (correctBounds.y + correctBounds.height));
+                boolean placeArrowBelow = availableBelow >= availableAbove;
+
+                int arrowTipY;
+                int arrowHeadTopY;
+                int arrowStartY;
+                if (placeArrowBelow) {
+                    arrowTipY = Math.min(logicalHeight - 8, correctBounds.y + correctBounds.height + 2);
+                    int arrowHeadBottomY = Math.min(logicalHeight - 6, arrowTipY + 12);
+                    arrowHeadTopY = arrowTipY;
+                    arrowStartY = Math.min(logicalHeight - 6, arrowHeadBottomY + 16);
+                } else {
+                    arrowTipY = Math.max(topReserved, correctBounds.y - 2);
+                    arrowHeadTopY = Math.max(topReserved - 6, arrowTipY - 12);
+                    arrowStartY = Math.max(18, arrowHeadTopY - 16);
+                }
+                int arrowHalf = 7;
+
+                var arrowHead = placeArrowBelow
+                    ? new Polygon(
+                        new int[]{centerX - arrowHalf, centerX + arrowHalf, centerX},
+                        new int[]{arrowTipY + 12, arrowTipY + 12, arrowTipY},
+                        3
+                    )
+                    : new Polygon(
+                        new int[]{centerX - arrowHalf, centerX + arrowHalf, centerX},
+                        new int[]{arrowHeadTopY, arrowHeadTopY, arrowTipY},
+                        3
+                    );
+                g.setColor(BLACK);
+                g.fillPolygon(arrowHead);
+                if (placeArrowBelow) {
+                    g.drawLine(centerX, arrowStartY, centerX, arrowTipY + 12);
+                } else {
+                    g.drawLine(centerX, arrowStartY, centerX, arrowHeadTopY);
+                }
+
+                int ringPad = 4;
+                Rectangle ringRect = clampRect(new Rectangle(
+                    correctBounds.x - ringPad,
+                    correctBounds.y - ringPad,
+                    correctBounds.width + ringPad * 2,
+                    correctBounds.height + ringPad * 2
+                ));
+                g.drawRect(ringRect.x, ringRect.y, ringRect.width - 1, ringRect.height - 1);
+
+                var overlays = new ArrayList<Rectangle>(1);
+                int markerX = Math.max(0, ringRect.x - 10);
+                int markerY = Math.max(0, Math.min(arrowStartY, ringRect.y) - 2);
+                int markerW = Math.min(logicalWidth - markerX, ringRect.width + 20);
+                int markerBottom = Math.max(ringRect.y + ringRect.height + 2, placeArrowBelow ? arrowStartY + 2 : arrowTipY + 2);
+                int markerH = Math.min(logicalHeight - markerY, markerBottom - markerY);
+                overlays.add(clampRect(new Rectangle(markerX, markerY, markerW, markerH)));
+                return overlays;
+            } finally {
+                g.dispose();
+            }
+        }
+
+        private BufferedImage renderCompletionScreen(int passed, int failed, Path reportPath) {
+            Optional<BufferedImage> poster = loadResourceImage("icons/Pux.png");
+            if (poster.isEmpty()) {
+                return renderFallbackCompletion(passed, failed, reportPath);
+            }
+
             var image = blankCanvas();
             var g = graphics(image);
             try {
-                drawHeader(g, "Step " + step + " / " + total, "Feedback");
-                var correct = validationStep.findByName(validationStep.correctItem)
-                    .orElseThrow(() -> new IllegalStateException("Missing correct item: " + validationStep.correctItem));
-                correct.renderer.render(g, correct.bounds);
+                drawHeader(g, "Validation Complete", "Pux", passed, failed);
+                drawCenteredText(g, "COMPLETE", 44, true);
+                BufferedImage src = poster.get();
 
-                drawCenteredText(g, pass ? "PASS" : "FAIL", 18, true);
-                if (!pass) {
-                    drawCenteredText(g, "Correct: " + validationStep.correctItem, logicalHeight - 14, false);
-                }
+                int availableTop = 50;
+                int availableBottom = logicalHeight - 28;
+                int availableHeight = Math.max(20, availableBottom - availableTop);
+                int availableWidth = logicalWidth - 8;
+
+                double scale = Math.min((double) availableWidth / src.getWidth(), (double) availableHeight / src.getHeight());
+                scale = Math.min(scale, 1.0);
+
+                int drawW = Math.max(1, (int) Math.round(src.getWidth() * scale));
+                int drawH = Math.max(1, (int) Math.round(src.getHeight() * scale));
+                int drawX = (logicalWidth - drawW) / 2;
+                int drawY = availableTop + ((availableHeight - drawH) / 2);
+
+                BufferedImage mono = toHighContrastMonochrome(src, drawW, drawH);
+                g.drawImage(mono, drawX, drawY, drawW, drawH, null);
+                g.setColor(BLACK);
+                g.drawRect(drawX, drawY, Math.max(0, drawW - 1), Math.max(0, drawH - 1));
+
+                drawCenteredText(g, "Passed: " + passed + "   Failed: " + failed, logicalHeight - 12, true);
             } finally {
                 g.dispose();
             }
             return image;
         }
 
-        private BufferedImage renderSummary(int passed, int failed, Path reportPath) {
+        private BufferedImage renderFallbackCompletion(int passed, int failed, Path reportPath) {
             var image = blankCanvas();
             var g = graphics(image);
             try {
-                drawHeader(g, "Validation Complete", "Summary");
+                drawHeader(g, "Validation Complete", "Summary", passed, failed);
                 drawCenteredText(g, "Passed: " + passed, logicalHeight / 2 - 10, true);
                 drawCenteredText(g, "Failed: " + failed, logicalHeight / 2 + 10, true);
                 drawWrappedCentered(g, "Report: " + reportPath.getFileName(), logicalHeight - 14, 16, false);
@@ -497,6 +694,65 @@ public final class HardwareValidationTest {
                 g.dispose();
             }
             return image;
+        }
+
+        private BufferedImage toHighContrastMonochrome(BufferedImage source, int width, int height) {
+            var scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+            var gs = scaled.createGraphics();
+            gs.setColor(WHITE);
+            gs.fillRect(0, 0, width, height);
+            gs.drawImage(source, 0, 0, width, height, null);
+            gs.dispose();
+
+            var out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int argb = scaled.getRGB(x, y);
+                    int a = (argb >>> 24) & 0xFF;
+                    int r = (argb >>> 16) & 0xFF;
+                    int g = (argb >>> 8) & 0xFF;
+                    int b = argb & 0xFF;
+                    int luminance = (r * 299 + g * 587 + b * 114) / 1000;
+                    boolean dark = a > 20 && luminance < 190;
+                    out.setRGB(x, y, dark ? BLACK.getRGB() : WHITE.getRGB());
+                }
+            }
+            return out;
+        }
+
+        private Optional<BufferedImage> loadResourceImage(String resourcePath) {
+            var candidates = List.of(
+                resourcePath,
+                "/" + resourcePath,
+                "icons/" + Path.of(resourcePath).getFileName(),
+                "/icons/" + Path.of(resourcePath).getFileName()
+            );
+
+            for (var candidate : candidates) {
+                try (InputStream stream = openResource(candidate)) {
+                    if (stream == null) {
+                        continue;
+                    }
+                    var image = ImageIO.read(stream);
+                    if (image != null) {
+                        return Optional.of(image);
+                    }
+                } catch (IOException e) {
+                    log.warn("Unable to load resource image {}", candidate, e);
+                }
+            }
+
+            log.debug("Resource image not found: {}", resourcePath);
+            return Optional.empty();
+        }
+
+        private InputStream openResource(String resourcePath) {
+            InputStream stream = HardwareValidationTest.class.getResourceAsStream(resourcePath);
+            if (stream != null) {
+                return stream;
+            }
+            String stripped = resourcePath.startsWith("/") ? resourcePath.substring(1) : resourcePath;
+            return HardwareValidationTest.class.getClassLoader().getResourceAsStream(stripped);
         }
 
         private void drawPrompt(BufferedImage image, int y, int height, String prompt) {
@@ -637,13 +893,35 @@ public final class HardwareValidationTest {
             return g;
         }
 
-        private void drawHeader(Graphics2D g, String title, String subtitle) {
+        private void drawHeader(Graphics2D g, String title, String subtitle, int passed, int failed) {
             g.setColor(BLACK);
             g.drawLine(0, 26, logicalWidth - 1, 26);
             drawCenteredText(g, title, 14, true);
             g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, logicalHeight / 16)));
             drawCenteredText(g, subtitle, 24, false);
+            drawScoreBadge(g, passed, failed);
             g.setFont(new Font("SansSerif", Font.BOLD, Math.max(12, logicalHeight / 12)));
+        }
+
+        private void drawScoreBadge(Graphics2D g, int passed, int failed) {
+            String text = "P:" + passed + "  F:" + failed;
+            Font badgeFont = new Font("SansSerif", Font.BOLD, Math.max(10, logicalHeight / 17));
+            g.setFont(badgeFont);
+            FontMetrics fm = g.getFontMetrics();
+            int padX = 5;
+            int padY = 2;
+            int badgeX = 6;
+            int badgeY = 3;
+            int badgeW = fm.stringWidth(text) + (padX * 2);
+            int badgeH = fm.getHeight() + (padY * 2);
+
+            g.setColor(WHITE);
+            g.fillRect(badgeX, badgeY, badgeW, badgeH);
+            g.setColor(BLACK);
+            g.drawRect(badgeX, badgeY, badgeW, badgeH);
+            int textX = badgeX + padX;
+            int textY = badgeY + padY + fm.getAscent();
+            g.drawString(text, textX, textY);
         }
 
         private void drawWrappedCentered(Graphics2D g, String text, int y, int lineHeight, boolean bold) {
@@ -692,10 +970,35 @@ public final class HardwareValidationTest {
             g.setColor(BLACK);
             g.drawString(text, x, baselineY);
         }
+
+        private Rectangle clampRect(Rectangle rect) {
+            int x = Math.max(0, rect.x);
+            int y = Math.max(0, rect.y);
+            int maxW = logicalWidth - x;
+            int maxH = logicalHeight - y;
+            int w = Math.max(1, Math.min(rect.width, maxW));
+            int h = Math.max(1, Math.min(rect.height, maxH));
+            return new Rectangle(x, y, w, h);
+        }
     }
 
     private record ValidationStep(String instructionText, String correctItem, List<ChallengeItem> items) {
         private Optional<ChallengeItem> match(TouchPoint point, int tolerance) {
+            var strictMatches = new ArrayList<ChallengeItem>();
+            for (var item : items) {
+                if (item.bounds.contains(point.x(), point.y())) {
+                    strictMatches.add(item);
+                }
+            }
+
+            if (strictMatches.size() == 1) {
+                return Optional.of(strictMatches.getFirst());
+            }
+            if (strictMatches.size() > 1) {
+                return Optional.empty();
+            }
+
+            var expandedMatches = new ArrayList<ChallengeItem>();
             for (var item : items) {
                 Rectangle expanded = new Rectangle(
                     item.bounds.x - tolerance,
@@ -704,8 +1007,15 @@ public final class HardwareValidationTest {
                     item.bounds.height + tolerance * 2
                 );
                 if (expanded.contains(point.x(), point.y())) {
-                    return Optional.of(item);
+                    expandedMatches.add(item);
                 }
+            }
+
+            if (expandedMatches.size() == 1) {
+                return Optional.of(expandedMatches.getFirst());
+            }
+            if (expandedMatches.size() > 1) {
+                return Optional.empty();
             }
             return Optional.empty();
         }
@@ -719,6 +1029,10 @@ public final class HardwareValidationTest {
                 .map(item -> item.bounds)
                 .orElseThrow(() -> new IllegalStateException("Missing correct item: " + correctItem));
         }
+
+        private Rectangle correctItemBounds() {
+            return expectedRegion();
+        }
     }
 
     private record ChallengeItem(String name, Rectangle bounds, ItemRenderer renderer) {}
@@ -729,6 +1043,8 @@ public final class HardwareValidationTest {
     }
 
     private static final class ValidationStepFactory {
+
+        private static final Map<String, Optional<BufferedImage>> PNG_CACHE = new HashMap<>();
 
         private static List<ValidationStep> build(int width, int height) {
             int margin = Math.max(8, Math.min(width, height) / 18);
@@ -812,18 +1128,18 @@ public final class HardwareValidationTest {
                     "Touch the CAT",
                     "CAT",
                     List.of(
-                        item("CAT", iconLeft, ValidationStepFactory::drawCatIcon),
-                        item("DOG", iconCenter, ValidationStepFactory::drawDogIcon),
-                        item("FISH", iconRight, ValidationStepFactory::drawFishIcon)
+                        item("CAT", iconLeft, pngIcon("icons/cat.png", ValidationStepFactory::drawCatIcon)),
+                        item("DOG", iconCenter, pngIcon("icons/dog.png", ValidationStepFactory::drawDogIcon)),
+                        item("FISH", iconRight, pngIcon("icons/fish.png", ValidationStepFactory::drawFishIcon))
                     )
                 ),
                 new ValidationStep(
                     "Touch the ICE CREAM",
                     "ICE_CREAM",
                     List.of(
-                        item("ICE_CREAM", iconLeft, ValidationStepFactory::drawIceCreamIcon),
-                        item("BURGER", iconCenter, ValidationStepFactory::drawBurgerIcon),
-                        item("APPLE", iconRight, ValidationStepFactory::drawAppleIcon)
+                        item("ICE_CREAM", iconLeft, pngIcon("icons/ice-cream.png", ValidationStepFactory::drawIceCreamIcon)),
+                        item("BURGER", iconCenter, pngIcon("icons/burger.png", ValidationStepFactory::drawBurgerIcon)),
+                        item("APPLE", iconRight, pngIcon("icons/apple.png", ValidationStepFactory::drawAppleIcon))
                     )
                 ),
                 new ValidationStep(
@@ -862,6 +1178,38 @@ public final class HardwareValidationTest {
 
         private static ChallengeItem item(String name, Rectangle bounds, ItemRenderer renderer) {
             return new ChallengeItem(name, bounds, renderer);
+        }
+
+        private static ItemRenderer pngIcon(String resourcePath, ItemRenderer fallback) {
+            return (g, bounds) -> {
+                var image = loadIcon(resourcePath);
+                if (image.isPresent()) {
+                    g.drawImage(image.get(), bounds.x, bounds.y, bounds.width, bounds.height, null);
+                } else {
+                    fallback.render(g, bounds);
+                }
+            };
+        }
+
+        private static Optional<BufferedImage> loadIcon(String resourcePath) {
+            if (PNG_CACHE.containsKey(resourcePath)) {
+                return PNG_CACHE.get(resourcePath);
+            }
+
+            try (InputStream stream = HardwareValidationTest.class.getClassLoader().getResourceAsStream(resourcePath)) {
+                Optional<BufferedImage> loaded = stream == null
+                    ? Optional.empty()
+                    : Optional.ofNullable(ImageIO.read(stream));
+                PNG_CACHE.put(resourcePath, loaded);
+                if (loaded.isEmpty()) {
+                    log.debug("PNG icon not found on classpath: {} (using fallback renderer)", resourcePath);
+                }
+                return loaded;
+            } catch (IOException e) {
+                log.warn("Failed to load PNG icon {} (using fallback renderer)", resourcePath, e);
+                PNG_CACHE.put(resourcePath, Optional.empty());
+                return Optional.empty();
+            }
         }
 
         private static void drawSquare(Graphics2D g, Rectangle r) {
