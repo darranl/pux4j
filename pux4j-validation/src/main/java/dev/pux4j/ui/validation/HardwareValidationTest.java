@@ -126,8 +126,7 @@ public final class HardwareValidationTest {
                 log.info("Step {}: {}", stepNumber, step.instructionText);
 
                 showInstructionPhase(display, renderer, touchPoller, stepNumber, steps.size(), passedSoFar, failedSoFar,
-                    step.instructionText,
-                    options.usePartialPrompts);
+                    step.instructionText);
 
                 var challengeImage = renderer.renderChallenge(stepNumber, steps.size(), step.instructionText, step.items,
                     passedSoFar, failedSoFar);
@@ -215,8 +214,7 @@ public final class HardwareValidationTest {
                                              int total,
                                              int passed,
                                              int failed,
-                                             String instruction,
-                                             boolean usePartialPrompts) {
+                                             String instruction) {
         log.info("PHASE step={} instruction: preparing instruction screen", step);
         touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
         touchPoller.waitForIdle(TOUCH_ARM_TIMEOUT, TOUCH_ARM_STABLE_PERIOD);
@@ -225,8 +223,7 @@ public final class HardwareValidationTest {
         log.info("PHASE step={} instruction: instruction rendered; waiting for proceed tap (hint timeout {} ms)",
             step, INSTRUCTION_HINT_TIMEOUT.toMillis());
         TouchPoller.sleep(DISPLAY_SETTLE_AFTER_REFRESH);
-        waitForTapWithPrompt(display, renderer, touchPoller, image, INSTRUCTION_HINT_TIMEOUT, "Tap to advance",
-            usePartialPrompts);
+        waitForTapWithPrompt(display, renderer, touchPoller, image, INSTRUCTION_HINT_TIMEOUT, "Tap to advance");
         log.info("PHASE step={} instruction: proceed tap received", step);
     }
 
@@ -236,10 +233,8 @@ public final class HardwareValidationTest {
                                           ValidationStep validationStep,
                                           boolean pass) {
         log.info("PHASE feedback: rendering {} overlay", pass ? "PASS" : "FAIL");
-        var overlays = renderer.drawChallengeFeedbackOverlay(challengeImage, validationStep.correctItemBounds(), pass);
-        for (var overlay : overlays) {
-            renderer.writeRegion(display, challengeImage, overlay.x, overlay.y, overlay.width, overlay.height);
-        }
+        renderer.drawChallengeFeedbackOverlay(challengeImage, validationStep.correctItemBounds(), pass);
+        renderer.writePartial(display, challengeImage);
         log.info("PHASE feedback: overlay rendered; holding {} ms before next step", FEEDBACK_HINT_TIMEOUT.toMillis());
         TouchPoller.sleep(FEEDBACK_HINT_TIMEOUT);
     }
@@ -249,8 +244,7 @@ public final class HardwareValidationTest {
                                              TouchPoller touchPoller,
                                              BufferedImage currentImage,
                                              Duration initialTimeout,
-                                             String prompt,
-                                             boolean usePartialPrompts) {
+                                             String prompt) {
         touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
         touchPoller.waitForIdle(TOUCH_ARM_TIMEOUT, TOUCH_ARM_STABLE_PERIOD);
         log.info("PHASE instruction-wait: waiting for tap for up to {} ms", initialTimeout.toMillis());
@@ -264,11 +258,7 @@ public final class HardwareValidationTest {
         int promptHeight = Math.max(20, renderer.logicalHeight() / 8);
         int promptY = renderer.logicalHeight() - promptHeight;
         renderer.drawPrompt(currentImage, promptY, promptHeight, prompt);
-        if (usePartialPrompts) {
-            renderer.writeRegion(display, currentImage, 0, promptY, renderer.logicalWidth(), promptHeight);
-        } else {
-            renderer.writeFull(display, currentImage);
-        }
+        renderer.writePartial(display, currentImage);
         touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
         touchPoller.waitForIdle(TOUCH_ARM_TIMEOUT, TOUCH_ARM_STABLE_PERIOD);
         touchPoller.waitForTap();
@@ -335,7 +325,6 @@ public final class HardwareValidationTest {
         int touchRstPin,
         int touchIntPin,
         int scenarioCount,
-        boolean usePartialPrompts,
         String notes
     ) {
         private static Options parse(String[] args) {
@@ -354,7 +343,6 @@ public final class HardwareValidationTest {
             int touchRstPin = 22;
             int touchIntPin = 27;
             int scenarioCount = 2;
-            boolean usePartialPrompts = false;
             String notes = "";
 
             for (int i = 0; i < args.length; i++) {
@@ -379,7 +367,6 @@ public final class HardwareValidationTest {
                     case "--touch-int-pin" -> touchIntPin = Integer.parseInt(requireValue(args, ++i, arg));
                     case "--scenario-count" -> scenarioCount = Integer.parseInt(requireValue(args, ++i, arg));
                     case "--all-scenarios" -> scenarioCount = Integer.MAX_VALUE;
-                    case "--use-partial-prompts" -> usePartialPrompts = true;
                     case "--notes" -> notes = requireValue(args, ++i, arg);
                     default -> throw new IllegalArgumentException("Unknown argument: " + arg);
                 }
@@ -401,7 +388,6 @@ public final class HardwareValidationTest {
                 touchRstPin,
                 touchIntPin,
                 scenarioCount,
-                usePartialPrompts,
                 notes
             );
         }
@@ -549,7 +535,8 @@ public final class HardwareValidationTest {
             try {
                 drawHeader(g, "Step " + step + " / " + total, "Instruction", passed, failed);
                 drawWrappedCentered(g, instruction, logicalHeight / 2 - 10, 20, true);
-                drawCenteredText(g, "Tap anywhere to continue", logicalHeight - 14, false);
+                // Bottom strip left blank so the partial-refresh prompt has a clean
+                // white baseline — avoids bidirectional pixel transitions in the LUT.
             } finally {
                 g.dispose();
             }
@@ -773,73 +760,16 @@ public final class HardwareValidationTest {
             display.writeFrame(new MonochromeFrame(packed, RefreshMode.FULL)).join();
         }
 
-        private void writeRegion(EInkDisplayDriver display,
-                                 BufferedImage image,
-                                 int logicalX,
-                                 int logicalY,
-                                 int logicalW,
-                                 int logicalH) {
-            byte[] full = packMonochrome(image);
-            var logicalRect = new Rectangle(logicalX, logicalY, logicalW, logicalH);
-            var fbRect = mapLogicalRectToFramebuffer(logicalRect);
-
-            int alignedXStart = Math.floorDiv(fbRect.x, 8) * 8;
-            int alignedXEnd = Math.min(framebufferWidth - 1, ((fbRect.x + fbRect.width - 1) / 8 + 1) * 8 - 1);
-            int width = alignedXEnd - alignedXStart + 1;
-            int height = fbRect.height;
-
-            byte[] region = extractRegion(full, alignedXStart, fbRect.y, width, height);
-            display.writeRegion(alignedXStart, fbRect.y, width, height, new MonochromeFrame(region, RefreshMode.PARTIAL)).join();
+        // Writes the full packed frame using the partial waveform. Only pixels that
+        // changed from the previous full frame will visibly update on the display.
+        // The SSD1675A reference implementation always writes the complete framebuffer
+        // for partial updates (it never sub-region-writes to 0x24); we follow that.
+        private void writePartial(EInkDisplayDriver display, BufferedImage image) {
+            byte[] packed = packMonochrome(image);
+            display.writeFrame(new MonochromeFrame(packed, RefreshMode.PARTIAL)).join();
         }
 
-        private byte[] extractRegion(byte[] full, int x, int y, int width, int height) {
-            int rowBytes = width / 8;
-            byte[] region = new byte[rowBytes * height];
-            Arrays.fill(region, (byte) 0xFF);
 
-            for (int row = 0; row < height; row++) {
-                int fbY = y + row;
-                for (int col = 0; col < width; col++) {
-                    int fbX = x + col;
-                    boolean white = isWhite(full, fbX, fbY);
-                    if (!white) {
-                        int dst = row * rowBytes + (col / 8);
-                        int bit = 7 - (col % 8);
-                        region[dst] = (byte) (region[dst] & ~(1 << bit));
-                    }
-                }
-            }
-            return region;
-        }
-
-        private boolean isWhite(byte[] framebuffer, int x, int y) {
-            int idx = y * framebufferRowBytes + (x / 8);
-            int bit = 7 - (x % 8);
-            return ((framebuffer[idx] >> bit) & 1) == 1;
-        }
-
-        private Rectangle mapLogicalRectToFramebuffer(Rectangle rect) {
-            var points = new int[][]{
-                mapLogicalToFramebuffer(rect.x, rect.y),
-                mapLogicalToFramebuffer(rect.x + rect.width - 1, rect.y),
-                mapLogicalToFramebuffer(rect.x, rect.y + rect.height - 1),
-                mapLogicalToFramebuffer(rect.x + rect.width - 1, rect.y + rect.height - 1)
-            };
-
-            int minX = Integer.MAX_VALUE;
-            int minY = Integer.MAX_VALUE;
-            int maxX = Integer.MIN_VALUE;
-            int maxY = Integer.MIN_VALUE;
-
-            for (var p : points) {
-                minX = Math.min(minX, p[0]);
-                minY = Math.min(minY, p[1]);
-                maxX = Math.max(maxX, p[0]);
-                maxY = Math.max(maxY, p[1]);
-            }
-
-            return new Rectangle(minX, minY, maxX - minX + 1, maxY - minY + 1);
-        }
 
         private byte[] packMonochrome(BufferedImage image) {
             byte[] out = new byte[framebufferRowBytes * framebufferHeight];

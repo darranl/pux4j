@@ -23,7 +23,6 @@ Examples:
   ./pux4j-validation/run-hardware-validation.sh pi500-2in9
   ./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --scenario-count 4
   ./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --all-scenarios
-  ./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --use-partial-prompts
   ./pux4j-validation/run-hardware-validation.sh custom -- --display ssd1675a --touch icnt86x --orientation LANDSCAPE
   ./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --notes "pi500 baseline run"
 
@@ -67,6 +66,8 @@ case "$PROFILE" in
       --orientation LANDSCAPE
       --touch-native-width 296
       --touch-native-height 128
+      --flip-x
+      --flip-y
     )
     ;;
   little-2in13)

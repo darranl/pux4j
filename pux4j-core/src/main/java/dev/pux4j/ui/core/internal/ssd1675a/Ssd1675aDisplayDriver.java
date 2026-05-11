@@ -21,6 +21,7 @@ import dev.pux4j.ui.core.RefreshMode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -122,6 +123,11 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     private final DigitalOutput rst;
     private final DigitalInput  busy;
     private boolean fullModeConfigured;
+    // Cached copy of the last frame written to 0x24. Used to explicitly re-prime
+    // 0x26 (previous-frame RAM) before each partial refresh so the IC computes
+    // the delta against what is actually displayed. The IC does not maintain
+    // 0x26 reliably across our full↔partial mode transitions.
+    private final byte[] lastFrameBytes = new byte[FRAME_BYTES];
 
     Ssd1675aDisplayDriver(DriverConfig config) {
         var ctx  = config.pi4j();
@@ -164,6 +170,9 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
             .bcm(busyPin)
             .pull(PullResistance.PULL_DOWN)
             .build());
+
+        // Display powers on with all pixels white; mirror that in the baseline cache.
+        Arrays.fill(lastFrameBytes, (byte) 0xFF);
     }
 
     @Override public int getWidth()                        { return WIDTH; }
@@ -174,9 +183,6 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     @Override
     public void initialize() {
         log.debug("SSD1675A: initialize");
-        hardwareReset();
-        delay(100);
-        waitBusy();
         configureFullRefreshMode();
         log.debug("SSD1675A: initialized");
     }
@@ -240,35 +246,53 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     // --- Frame write helpers ---
 
     private CompletableFuture<Void> writeFullFrame(byte[] data) {
-        log.debug("SSD1675A: full-refresh frame ({} bytes)", data.length);
+        log.debug("writeFullFrame: begin ({} bytes, fullModeConfigured={})", data.length, fullModeConfigured);
         waitBusy();
         if (!fullModeConfigured) {
-            configureFullRefreshMode();
+            // Transitioning from PARTIAL mode back to FULL. We deliberately do
+            // NOT call configureFullRefreshMode() here — partialInit already
+            // re-applied the registers we need (DRIVER_OUTPUT, DATA_ENTRY_MODE,
+            // DISP_UPDATE_1, window/cursor), and the 0xF7 activate below has
+            // bit 4 set ("Load LUT with display mode 1") which reloads the
+            // OTP default full-refresh LUT. Adding a hardware reset on this
+            // transition leaves the IC in a state where the subsequent full
+            // refresh produces inverted output — observed in round 16.
+            // WaveShare's reference Display_Base() does exactly this: no reset,
+            // just write 0x24/0x26 + activate 0xF7.
+            log.debug("writeFullFrame: transitioning from PARTIAL → FULL without reset");
+            fullModeConfigured = true;
         }
         setFullWindow();
+        log.debug("writeFullFrame: writing 0x24 BW RAM");
         sendCommand(CMD_WRITE_BW_RAM);
         sendData(data);
-        // Prime 0x26 (previous-frame RAM) with the same data so the IC has a valid
-        // baseline for the delta computation used by subsequent partial refreshes.
         setCursor(0, 0);
+        log.debug("writeFullFrame: writing 0x26 RED RAM (baseline for partial)");
         sendCommand(CMD_WRITE_RED_RAM);
         sendData(data);
+        log.debug("writeFullFrame: activate full update (DUC2=0xF7)");
         sendCommand(CMD_DISP_UPDATE_2, (byte)0xF7);
         sendCommand(CMD_ACTIVATE);
         waitBusy();
+        System.arraycopy(data, 0, lastFrameBytes, 0, FRAME_BYTES);
+        log.debug("writeFullFrame: complete");
         return CompletableFuture.completedFuture(null);
     }
 
     private CompletableFuture<Void> writePartialFrame(byte[] data) {
-        log.debug("SSD1675A: partial-refresh frame ({} bytes)", data.length);
+        log.debug("writePartialFrame: begin ({} bytes)", data.length);
         waitBusy();
         partialInit();
         setFullWindow();
+        log.debug("writePartialFrame: writing 0x24 BW RAM with new frame");
         sendCommand(CMD_WRITE_BW_RAM);
         sendData(data);
+        log.debug("writePartialFrame: activate partial display (DUC2=0x0F)");
         sendCommand(CMD_DISP_UPDATE_2, (byte)0x0F);
         sendCommand(CMD_ACTIVATE);
         waitBusy();
+        System.arraycopy(data, 0, lastFrameBytes, 0, FRAME_BYTES);
+        log.debug("writePartialFrame: complete");
         return CompletableFuture.completedFuture(null);
     }
 
@@ -290,15 +314,33 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     // --- Init sequences ---
 
     private void partialInit() {
-        log.debug("SSD1675A: partialInit");
+        log.debug("partialInit: begin");
         fullModeConfigured = false;
+        // Reverted to round-10 state after round 12 (brief RST, no register
+        // re-init) regressed: the BUSY-hang crash returned on the 2nd partial
+        // with no visibility improvement. The register re-init below is
+        // load-bearing for stability even though it does not fix visibility.
+        log.debug("partialInit: RST pulse (2 ms LOW + 20 ms HIGH + waitBusy)");
         rst.state(DigitalState.LOW);
-        delay(1);
+        delay(2);
         rst.state(DigitalState.HIGH);
-
-        sendCommand(CMD_WRITE_LUT);
-        sendData(WF_PARTIAL_2IN9_WAIT);
+        delay(20);
         waitBusy();
+        log.debug("partialInit: RST complete, re-applying register configuration");
+        sendCommand(CMD_DRIVER_OUTPUT,   (byte)0x27, (byte)0x01, (byte)0x00);
+        sendCommand(CMD_DATA_ENTRY_MODE, (byte)0x03);
+        setFullWindow();
+        sendCommand(CMD_DISP_UPDATE_1,   (byte)0x00, (byte)0x80);
+        setCursor(0, 0);
+        // Partial LUT as a single 159-byte burst. WaveShare's reference sends
+        // the same payload via CMD 0x32 and their partials render correctly,
+        // so the IC accepts the trailing voltage bytes as part of the LUT
+        // register for partial waveforms.
+        log.debug("partialInit: loading 159-byte partial LUT via CMD 0x32");
+        sendCommand(CMD_WRITE_LUT);
+        sendData(WF_PARTIAL_2IN9_WAIT, 0, 159);
+        waitBusy();
+        log.debug("partialInit: LUT loaded, applying display option / border / activating clock+analog");
 
         sendCommand(CMD_WRITE_DISP_OPT,
             (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00, (byte)0x00,
@@ -307,6 +349,7 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         sendCommand(CMD_DISP_UPDATE_2,   (byte)0xC0);
         sendCommand(CMD_ACTIVATE);
         waitBusy();
+        log.debug("partialInit: complete");
     }
 
     private void fourGrayInit() {
@@ -337,12 +380,18 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     }
 
     private void configureFullRefreshMode() {
+        // Matches WaveShare EPD_2IN9_V2_Init(): hardware reset then SW_RESET then configure.
+        // The hardware reset is required to cleanly exit partial mode before a full refresh.
+        hardwareReset();
+        delay(100);
+        waitBusy();
         sendCommand(CMD_SW_RESET);
         waitBusy();
         sendCommand(CMD_DRIVER_OUTPUT,   (byte)0x27, (byte)0x01, (byte)0x00);
         sendCommand(CMD_DATA_ENTRY_MODE, (byte)0x03);
         setFullWindow();
         sendCommand(CMD_DISP_UPDATE_1,   (byte)0x00, (byte)0x80);
+        setCursor(0, 0);
         waitBusy();
         fullModeConfigured = true;
     }
@@ -358,14 +407,21 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         delay(20);
     }
 
+    private static final long BUSY_TIMEOUT_MS = 10_000;
+
     private void waitBusy() {
+        long start = System.currentTimeMillis();
+        long deadline = start + BUSY_TIMEOUT_MS;
         while (busy.isHigh()) {
+            if (System.currentTimeMillis() > deadline) {
+                throw new IllegalStateException(
+                    "SSD1675A BUSY pin stuck HIGH after " + BUSY_TIMEOUT_MS + " ms");
+            }
             delay(10);
         }
-        // BUSY can briefly deassert between internal phases; require stable idle.
-        delay(20);
-        while (busy.isHigh()) {
-            delay(10);
+        long elapsed = System.currentTimeMillis() - start;
+        if (elapsed >= 5) {
+            log.debug("waitBusy: BUSY released after {} ms", elapsed);
         }
     }
 
