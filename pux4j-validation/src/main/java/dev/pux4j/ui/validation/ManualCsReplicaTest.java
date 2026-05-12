@@ -252,6 +252,12 @@ public final class ManualCsReplicaTest {
      * 0x24/0x26 frame writes and 0x32 LUT load. CS held LOW throughout,
      * including across the SPI chunk boundary (since each spi.transfer
      * call only toggles the kernel's CE pin which is now unconnected).
+     *
+     * <p>IMPORTANT: {@code Spi.transfer(byte[], int, int)} passes the caller's
+     * array as both the write <em>and</em> read buffer. The SPI controller writes
+     * the full-duplex read-back bytes (zeros from the eInk display) back into that
+     * same array, corrupting the source data in-place. To prevent this, each chunk
+     * is copied into a fresh byte array before being handed to {@code spi.transfer}.
      */
     private static void sendCommandData(Spi spi, DigitalOutput cs, DigitalOutput dc,
                                         byte cmd, byte[] data, int offset, int length) {
@@ -263,7 +269,9 @@ public final class ManualCsReplicaTest {
         int pos = offset;
         while (remaining > 0) {
             int chunk = Math.min(remaining, SPI_CHUNK);
-            spi.transfer(data, pos, chunk);
+            // Copy the chunk so the source array is not overwritten by SPI read-back.
+            byte[] buf = Arrays.copyOfRange(data, pos, pos + chunk);
+            spi.transfer(buf);
             pos       += chunk;
             remaining -= chunk;
         }

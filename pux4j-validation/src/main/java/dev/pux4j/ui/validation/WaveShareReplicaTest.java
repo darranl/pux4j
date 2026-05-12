@@ -275,7 +275,9 @@ public final class WaveShareReplicaTest {
         int pos = offset;
         while (remaining > 0) {
             int chunk = Math.min(remaining, SPI_CHUNK);
-            spi.transfer(data, pos, chunk);
+            // Copy the chunk so the source array is not overwritten by SPI read-back.
+            byte[] buf = Arrays.copyOfRange(data, pos, pos + chunk);
+            spi.transfer(buf);
             pos       += chunk;
             remaining -= chunk;
         }

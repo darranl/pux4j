@@ -149,3 +149,17 @@ Both run scripts already include:
 2. Run hardware validation with the hardware profile.
 3. If taps miss targets, rerun with custom touch mapping flags.
 4. Keep the generated report as evidence of pass/fail and calibration status.
+
+## ByteMan trace workflow
+
+The direct-ioctl and Pi4J SPI paths now have separate ByteMan rule sets in
+[`byteman/`](byteman/). Use the helper script to type-check or run traces:
+
+```bash
+./pux4j-validation/run-byteman-trace.sh check
+./pux4j-validation/run-byteman-trace.sh raw
+./pux4j-validation/run-byteman-trace.sh pi4j
+```
+
+By default the script uses the local ByteMan install at
+`/home/darranl/development/byteman-download-4.0.26`.
