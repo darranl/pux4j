@@ -86,11 +86,14 @@ final class Icnt86xTouchDriver implements TouchDriver {
 
     @Override
     public List<TouchPoint> readTouches() {
-        // The ICNT86X asserts INT low when touch data is ready. Checking the pin
-        // before reading avoids unnecessary I2C transactions when the screen is idle.
-        // We don't short-circuit here (hardware polling still reads the register) to
-        // keep the driver simple; INT state is logged at DEBUG for diagnostic tracing.
-        log.debug("ICNT86X: INT pin state = {}", touchInt.state());
+        // Gate on the INT pin before issuing any I2C read. The ICNT86X asserts
+        // INT LOW when new touch data is ready and releases it HIGH after the host
+        // clears REG_TOUCH_COUNT (write 0x00). If INT is HIGH, there is no pending
+        // data — return immediately to avoid unnecessary I2C traffic and log spam.
+        if (touchInt.isHigh()) {
+            return Collections.emptyList();
+        }
+        log.debug("ICNT86X: INT asserted (LOW) — reading touch data");
 
         byte[] countBuf = new byte[1];
         readRegister(REG_TOUCH_COUNT, countBuf);
@@ -122,9 +125,7 @@ final class Icnt86xTouchDriver implements TouchDriver {
             points.add(new TouchPoint(i, x, y, down));
         }
 
-        // Log at INFO so touch contacts appear in the validation test log without
-        // requiring debug level — confirms I2C reads are returning real data.
-        log.info("ICNT86X: {} touch contact(s): {}", count, points);
+        log.debug("ICNT86X: {} touch contact(s): {}", count, points);
         return Collections.unmodifiableList(points);
     }
 

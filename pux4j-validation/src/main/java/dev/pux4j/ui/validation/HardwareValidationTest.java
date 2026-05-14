@@ -364,7 +364,7 @@ public final class HardwareValidationTest {
             int touchI2cAddress = 0x48;
             int touchRstPin = 22;
             int touchIntPin = 27;
-            int scenarioCount = 2;
+            int scenarioCount = Integer.MAX_VALUE;
             String notes = "";
 
             for (int i = 0; i < args.length; i++) {
