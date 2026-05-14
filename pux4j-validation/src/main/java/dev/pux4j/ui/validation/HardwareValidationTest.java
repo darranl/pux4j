@@ -134,17 +134,11 @@ public final class HardwareValidationTest {
 
                 var challengeImage = renderer.renderChallenge(stepNumber, steps.size(), step.instructionText, step.items,
                     passedSoFar, failedSoFar);
-                log.info("PHASE step={} challenge: rendering challenge screen ({})", stepNumber,
-                    slowFull ? "FULL/slow" : "FAST");
-                // Fire the display write asynchronously so touch arming can run in
-                // parallel. For FAST refresh this barely matters, but for the first
-                // step's FULL refresh (~2 s) it removes that wait from the critical path.
-                CompletableFuture<Void> displayDone;
-                if (slowFull) {
-                    displayDone = renderer.writeFullAsync(display, challengeImage);
-                } else {
-                    displayDone = renderer.writeFastAsync(display, challengeImage);
-                }
+                log.info("PHASE step={} challenge: rendering challenge screen (FAST)", stepNumber);
+                // Challenge always uses FAST — the instruction-screen FULL refresh already
+                // established a clean pixel baseline for step 1; all subsequent transitions
+                // are fast with the custom LUT.
+                CompletableFuture<Void> displayDone = renderer.writeFastAsync(display, challengeImage);
                 log.info("PHASE step={} challenge: display update started; arming touch in parallel", stepNumber);
                 TouchPoller.sleep(DISPLAY_SETTLE_AFTER_REFRESH);
                 touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
@@ -1201,17 +1195,27 @@ public final class HardwareValidationTest {
                 return PNG_CACHE.get(resourcePath);
             }
 
-            try (InputStream stream = HardwareValidationTest.class.getClassLoader().getResourceAsStream(resourcePath)) {
-                Optional<BufferedImage> loaded = stream == null
+            // Class.getResourceAsStream with a leading '/' resolves from the module root,
+            // which works correctly under --module-path. ClassLoader.getResourceAsStream
+            // is not reliable for named module resources and is only tried as a fallback.
+            String absPath = resourcePath.startsWith("/") ? resourcePath : "/" + resourcePath;
+            InputStream stream = HardwareValidationTest.class.getResourceAsStream(absPath);
+            if (stream == null) {
+                String bare = resourcePath.startsWith("/") ? resourcePath.substring(1) : resourcePath;
+                stream = HardwareValidationTest.class.getClassLoader().getResourceAsStream(bare);
+            }
+
+            try (InputStream s = stream) {
+                Optional<BufferedImage> loaded = s == null
                     ? Optional.empty()
-                    : Optional.ofNullable(ImageIO.read(stream));
+                    : Optional.ofNullable(ImageIO.read(s));
                 PNG_CACHE.put(resourcePath, loaded);
                 if (loaded.isEmpty()) {
-                    log.debug("PNG icon not found on classpath: {} (using fallback renderer)", resourcePath);
+                    log.warn("PNG icon not found: {} (falling back to drawn shape)", resourcePath);
                 }
                 return loaded;
             } catch (IOException e) {
-                log.warn("Failed to load PNG icon {} (using fallback renderer)", resourcePath, e);
+                log.warn("Failed to load PNG icon {}", resourcePath, e);
                 PNG_CACHE.put(resourcePath, Optional.empty());
                 return Optional.empty();
             }
