@@ -380,8 +380,14 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         log.debug("writeFastFrame: writing 0x26 RED RAM (baseline for partial)");
         sendCommand(CMD_WRITE_RED_RAM);
         sendData(data);
-        log.debug("writeFastFrame: activate full update (DUC2=0xF7)");
-        sendCommand(CMD_DISP_UPDATE_2, (byte)0xF7);
+        // 0xC7 = enable clock + enable analog + display mode 1 + display mode 2 + disable analog + disable clock.
+        // Bit 4 (Load LUT from OTP) is deliberately NOT set — this preserves the custom WF_FULL LUT
+        // loaded by fastInit()/loadFastLut() via CMD 0x32, which is what makes this refresh FAST.
+        // Using 0xF7 (slow-FULL activation) here would reload the OTP LUT, discarding the custom LUT
+        // and producing a slow full refresh identical to writeFullFrame(). Matches WaveShare's
+        // EPD_2IN9_V2_TurnOnDisplay_Fast() which also uses 0xC7.
+        log.debug("writeFastFrame: activate fast update (DUC2=0xC7)");
+        sendCommand(CMD_DISP_UPDATE_2, (byte)0xC7);
         sendCommand(CMD_ACTIVATE);
         waitBusy();
         System.arraycopy(data, 0, lastFrameBytes, 0, FRAME_BYTES);
