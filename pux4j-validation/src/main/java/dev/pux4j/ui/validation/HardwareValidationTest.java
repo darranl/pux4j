@@ -192,6 +192,14 @@ public final class HardwareValidationTest {
             log.info("PHASE completion: extending completion dwell {} ms", COMPLETION_EXTRA_DWELL.toMillis());
             TouchPoller.sleep(COMPLETION_EXTRA_DWELL);
 
+            // Clear screen before sleep — WaveShare recommend not leaving pixels set to
+            // avoid long-term burn-in from sustained pixel states.
+            log.info("PHASE completion: clearing screen to all-white (FULL refresh) before sleep");
+            int clearBytes = (framebufferWidth / 8) * framebufferHeight;
+            byte[] allWhite = new byte[clearBytes];
+            Arrays.fill(allWhite, (byte) 0xFF);
+            display.writeFrame(new MonochromeFrame(allWhite, RefreshMode.FULL)).join();
+
             log.info("Validation complete: passed={} failed={} report={}", passed, failed, reportWriter.outputPath());
         } catch (Exception e) {
             log.error("HardwareValidationTest failed", e);
