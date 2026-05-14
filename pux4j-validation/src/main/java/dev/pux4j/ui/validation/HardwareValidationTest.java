@@ -46,6 +46,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.ServiceLoader;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Interactive 10-step hardware acceptance test.
@@ -135,15 +136,20 @@ public final class HardwareValidationTest {
                     passedSoFar, failedSoFar);
                 log.info("PHASE step={} challenge: rendering challenge screen ({})", stepNumber,
                     slowFull ? "FULL/slow" : "FAST");
+                // Fire the display write asynchronously so touch arming can run in
+                // parallel. For FAST refresh this barely matters, but for the first
+                // step's FULL refresh (~2 s) it removes that wait from the critical path.
+                CompletableFuture<Void> displayDone;
                 if (slowFull) {
-                    renderer.writeFull(display, challengeImage);
+                    displayDone = renderer.writeFullAsync(display, challengeImage);
                 } else {
-                    renderer.writeFast(display, challengeImage);
+                    displayDone = renderer.writeFastAsync(display, challengeImage);
                 }
-                log.info("PHASE step={} challenge: challenge rendered; waiting for stable touch release", stepNumber);
+                log.info("PHASE step={} challenge: display update started; arming touch in parallel", stepNumber);
                 TouchPoller.sleep(DISPLAY_SETTLE_AFTER_REFRESH);
                 touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
                 touchPoller.waitForIdle(TOUCH_ARM_TIMEOUT, TOUCH_ARM_STABLE_PERIOD);
+                displayDone.join();
                 log.info("PHASE step={} challenge: armed and waiting for answer tap", stepNumber);
 
                 var challengeStart = Instant.now();
@@ -778,13 +784,21 @@ public final class HardwareValidationTest {
         }
 
         private void writeFull(EInkDisplayDriver display, BufferedImage image) {
+            writeFullAsync(display, image).join();
+        }
+
+        private CompletableFuture<Void> writeFullAsync(EInkDisplayDriver display, BufferedImage image) {
             byte[] packed = packMonochrome(image);
-            display.writeFrame(new MonochromeFrame(packed, RefreshMode.FULL)).join();
+            return display.writeFrame(new MonochromeFrame(packed, RefreshMode.FULL));
         }
 
         private void writeFast(EInkDisplayDriver display, BufferedImage image) {
+            writeFastAsync(display, image).join();
+        }
+
+        private CompletableFuture<Void> writeFastAsync(EInkDisplayDriver display, BufferedImage image) {
             byte[] packed = packMonochrome(image);
-            display.writeFrame(new MonochromeFrame(packed, RefreshMode.FAST)).join();
+            return display.writeFrame(new MonochromeFrame(packed, RefreshMode.FAST));
         }
 
         // Writes the full packed frame using the partial waveform. Only pixels that
@@ -1009,7 +1023,17 @@ public final class HardwareValidationTest {
             int small = Math.max(15, shape / 2);
             int medium = Math.max(24, shape - 4);
             int large = Math.max(36, shape + 8);
-            int icon = Math.max(28, Math.min(width, height) / 3);
+
+            // Picture steps: each of the three images gets an equal 1/3-width slot
+            // spanning the full test area (below the 30 px header strip). Each image
+            // is as large as will fit, centred within its slot.
+            int headerH = 30;
+            int iconSlotW = (width - 2 * margin) / 3;
+            int icon = Math.min(iconSlotW - 4, height - headerH - margin);
+            int iconY = headerH + (height - headerH - margin - icon) / 2;
+            Rectangle iconLeft   = new Rectangle(margin + (iconSlotW - icon) / 2, iconY, icon, icon);
+            Rectangle iconCenter = new Rectangle(margin + iconSlotW + (iconSlotW - icon) / 2, iconY, icon, icon);
+            Rectangle iconRight  = new Rectangle(margin + 2 * iconSlotW + (iconSlotW - icon) / 2, iconY, icon, icon);
 
             Rectangle topLeft = new Rectangle(margin, margin + 24, shape, shape);
             Rectangle topRight = new Rectangle(width - margin - shape, margin + 24, shape, shape);
@@ -1018,10 +1042,6 @@ public final class HardwareValidationTest {
             Rectangle center = centered(width, height, shape, shape);
             Rectangle bottomCenter = new Rectangle((width - shape) / 2, height - margin - shape, shape, shape);
             Rectangle topCenter = new Rectangle((width - shape) / 2, margin + 24, shape, shape);
-
-            Rectangle iconLeft = new Rectangle(margin, (height - icon) / 2, icon, icon);
-            Rectangle iconCenter = new Rectangle((width - icon) / 2, (height - icon) / 2, icon, icon);
-            Rectangle iconRight = new Rectangle(width - margin - icon, (height - icon) / 2, icon, icon);
 
             Rectangle largeCenter = centered(width, height, large, large);
             Rectangle mediumLeft = new Rectangle(margin, height - margin - medium, medium, medium);
@@ -1141,11 +1161,39 @@ public final class HardwareValidationTest {
             return (g, bounds) -> {
                 var image = loadIcon(resourcePath);
                 if (image.isPresent()) {
-                    g.drawImage(image.get(), bounds.x, bounds.y, bounds.width, bounds.height, null);
+                    // Convert to high-contrast monochrome at the target size. This
+                    // handles alpha (transparent → white) and maps all non-trivially-
+                    // dark pixels to black, matching the eInk display's binary output.
+                    var mono = toMonochrome(image.get(), bounds.width, bounds.height);
+                    g.drawImage(mono, bounds.x, bounds.y, null);
                 } else {
                     fallback.render(g, bounds);
                 }
             };
+        }
+
+        private static BufferedImage toMonochrome(BufferedImage source, int width, int height) {
+            // Composite source (may be ARGB) onto a white background at the target size.
+            var composite = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+            var cg = composite.createGraphics();
+            cg.setColor(Color.WHITE);
+            cg.fillRect(0, 0, width, height);
+            cg.drawImage(source, 0, 0, width, height, null);
+            cg.dispose();
+            // Threshold to pure black/white with high-contrast luminance cutoff (190).
+            var out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int argb = composite.getRGB(x, y);
+                    int a = (argb >>> 24) & 0xFF;
+                    int r = (argb >>> 16) & 0xFF;
+                    int gv = (argb >>> 8) & 0xFF;
+                    int b = argb & 0xFF;
+                    int luminance = (r * 299 + gv * 587 + b * 114) / 1000;
+                    out.setRGB(x, y, (a > 20 && luminance < 190) ? Color.BLACK.getRGB() : Color.WHITE.getRGB());
+                }
+            }
+            return out;
         }
 
         private static Optional<BufferedImage> loadIcon(String resourcePath) {
