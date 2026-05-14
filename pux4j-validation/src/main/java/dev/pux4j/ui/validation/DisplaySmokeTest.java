@@ -148,6 +148,14 @@ public final class DisplaySmokeTest {
             doPartial(driver, overlayC2, "icon — black inside white window");
             sleepWithProgress(4_000, "observe step 7");
 
+            // ── Final: FULL clear — all white ────────────────────────────────
+            // WaveShare recommend not leaving pixels set when the display goes
+            // to sleep, as sustained pixel states can cause long-term burn-in.
+            banner("Final: FULL refresh — all white (screen clear before sleep)");
+            log.info("OBSERVE (landscape): panel flashes and clears to solid white");
+            doFull(driver, allWhite(), "all-white screen clear");
+            sleepWithProgress(2_000, "observe final clear");
+
             banner("SLEEP & SHUTDOWN");
             driver.sleep();
             log.info("DisplaySmokeTest: PASS — all 7 steps completed without exception");
