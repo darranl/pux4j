@@ -65,16 +65,17 @@ final class Icnt86xTouchDriver implements TouchDriver {
 
     @Override
     public void initialize() {
-        log.debug("ICNT86X: initialize");
+        log.info("ICNT86X: initializing touch IC");
         hardwareReset();
 
         byte[] version = new byte[4];
         readRegister(REG_IC_VERSION, version);
-        log.debug("ICNT86X: IC version=0x{}{}, FW version=0x{}{}",
-            Integer.toHexString(version[0] & 0xFF),
-            Integer.toHexString(version[1] & 0xFF),
-            Integer.toHexString(version[2] & 0xFF),
-            Integer.toHexString(version[3] & 0xFF));
+        // IC version bytes: [0]=IC major, [1]=IC minor, [2]=FW major, [3]=FW minor
+        log.info("ICNT86X: IC version 0x{}{} FW version 0x{}{}",
+            String.format("%02X", version[0] & 0xFF),
+            String.format("%02X", version[1] & 0xFF),
+            String.format("%02X", version[2] & 0xFF),
+            String.format("%02X", version[3] & 0xFF));
     }
 
     @Override
@@ -85,6 +86,12 @@ final class Icnt86xTouchDriver implements TouchDriver {
 
     @Override
     public List<TouchPoint> readTouches() {
+        // The ICNT86X asserts INT low when touch data is ready. Checking the pin
+        // before reading avoids unnecessary I2C transactions when the screen is idle.
+        // We don't short-circuit here (hardware polling still reads the register) to
+        // keep the driver simple; INT state is logged at DEBUG for diagnostic tracing.
+        log.debug("ICNT86X: INT pin state = {}", touchInt.state());
+
         byte[] countBuf = new byte[1];
         readRegister(REG_TOUCH_COUNT, countBuf);
         int count = countBuf[0] & 0xFF;
@@ -115,9 +122,9 @@ final class Icnt86xTouchDriver implements TouchDriver {
             points.add(new TouchPoint(i, x, y, down));
         }
 
-        if (log.isTraceEnabled()) {
-            log.trace("ICNT86X: {} touch point(s): {}", count, points);
-        }
+        // Log at INFO so touch contacts appear in the validation test log without
+        // requiring debug level — confirms I2C reads are returning real data.
+        log.info("ICNT86X: {} touch contact(s): {}", count, points);
         return Collections.unmodifiableList(points);
     }
 

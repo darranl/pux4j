@@ -150,16 +150,33 @@ Both run scripts already include:
 3. If taps miss targets, rerun with custom touch mapping flags.
 4. Keep the generated report as evidence of pass/fail and calibration status.
 
-## ByteMan trace workflow
+## Hardware trace workflow
 
-The direct-ioctl and Pi4J SPI paths now have separate ByteMan rule sets in
-[`byteman/`](byteman/). Use the helper script to type-check or run traces:
+The driver's SPI command and data writes can be traced live using ByteMan without
+modifying production code. The rules live in
+`pux4j-core/src/main/byteman/hardware-trace.btm`.
 
 ```bash
-./pux4j-validation/run-byteman-trace.sh check
-./pux4j-validation/run-byteman-trace.sh raw
-./pux4j-validation/run-byteman-trace.sh pi4j
+# Run smoke test with SPI-level trace printed to stdout
+./pux4j-validation/run-hardware-trace.sh
+
+# Filter trace lines only
+./pux4j-validation/run-hardware-trace.sh 2>&1 | grep '\[HW-TRACE\]'
+
+# Capture to file
+./pux4j-validation/run-hardware-trace.sh 2>&1 | tee /tmp/hw-trace.log
+
+# Type-check rules only (no hardware required)
+./pux4j-validation/run-hardware-trace.sh check
 ```
 
-By default the script uses the local ByteMan install at
-`/home/darranl/development/byteman-download-4.0.26`.
+Each [HW-TRACE] line is one of:
+- `CMD  0xNN (SYMBOLIC_NAME) data[N]=<hex>` — a sendCommand call
+- `DATA len=N preview=<first 16 bytes hex>...` — a sendData call
+
+Command bytes are annotated with their symbolic names (e.g. `WRITE_BW_RAM`,
+`WRITE_LUT`, `DISP_UPDATE_2`) via `CmdNames` in the driver package.
+
+Default ByteMan install location: `~/development/byteman-download-4.0.26`.
+Override with the `BYTEMAN_HOME` environment variable.
+

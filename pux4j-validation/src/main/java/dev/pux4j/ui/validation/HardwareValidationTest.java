@@ -123,15 +123,23 @@ public final class HardwareValidationTest {
             for (int i = 0; i < steps.size(); i++) {
                 var step = steps.get(i);
                 int stepNumber = i + 1;
+                // Step 1 uses a slow FULL refresh to establish a clean pixel baseline.
+                // Subsequent steps use FAST — no visible flash, quick transitions.
+                boolean slowFull = stepNumber == 1;
                 log.info("Step {}: {}", stepNumber, step.instructionText);
 
                 showInstructionPhase(display, renderer, touchPoller, stepNumber, steps.size(), passedSoFar, failedSoFar,
-                    step.instructionText);
+                    step.instructionText, slowFull);
 
                 var challengeImage = renderer.renderChallenge(stepNumber, steps.size(), step.instructionText, step.items,
                     passedSoFar, failedSoFar);
-                log.info("PHASE step={} challenge: rendering challenge screen", stepNumber);
-                renderer.writeFull(display, challengeImage);
+                log.info("PHASE step={} challenge: rendering challenge screen ({})", stepNumber,
+                    slowFull ? "FULL/slow" : "FAST");
+                if (slowFull) {
+                    renderer.writeFull(display, challengeImage);
+                } else {
+                    renderer.writeFast(display, challengeImage);
+                }
                 log.info("PHASE step={} challenge: challenge rendered; waiting for stable touch release", stepNumber);
                 TouchPoller.sleep(DISPLAY_SETTLE_AFTER_REFRESH);
                 touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
@@ -177,7 +185,7 @@ public final class HardwareValidationTest {
             reportWriter.finish((int) passed, failed);
 
             var completionImage = renderer.renderCompletionScreen((int) passed, failed, reportWriter.outputPath());
-            log.info("Rendering completion screen (pass={}, fail={})", passed, failed);
+            log.info("Rendering completion screen (pass={}, fail={}) — FULL/slow refresh (final cleanup)", passed, failed);
             renderer.writeFull(display, completionImage);
             log.info("PHASE completion: completion screen rendered; starting minimum dwell {} ms", COMPLETION_MIN_DWELL.toMillis());
             TouchPoller.sleep(COMPLETION_MIN_DWELL);
@@ -214,12 +222,18 @@ public final class HardwareValidationTest {
                                              int total,
                                              int passed,
                                              int failed,
-                                             String instruction) {
-        log.info("PHASE step={} instruction: preparing instruction screen", step);
+                                             String instruction,
+                                             boolean slowFull) {
+        log.info("PHASE step={} instruction: preparing instruction screen ({})", step,
+            slowFull ? "FULL/slow — baseline" : "FAST — no flash");
         touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
         touchPoller.waitForIdle(TOUCH_ARM_TIMEOUT, TOUCH_ARM_STABLE_PERIOD);
         var image = renderer.renderInstruction(step, total, instruction, passed, failed);
-        renderer.writeFull(display, image);
+        if (slowFull) {
+            renderer.writeFull(display, image);
+        } else {
+            renderer.writeFast(display, image);
+        }
         log.info("PHASE step={} instruction: instruction rendered; waiting for proceed tap (hint timeout {} ms)",
             step, INSTRUCTION_HINT_TIMEOUT.toMillis());
         TouchPoller.sleep(DISPLAY_SETTLE_AFTER_REFRESH);
@@ -441,7 +455,7 @@ public final class HardwareValidationTest {
                     anyDown = true;
                     if (firstMappedDown == null) {
                         TouchPoint mapped = mapper.map(point);
-                        log.debug("Touch raw=({}, {}) mapped=({}, {})", point.x(), point.y(), mapped.x(), mapped.y());
+                        log.info("Touch raw=({}, {}) mapped=({}, {})", point.x(), point.y(), mapped.x(), mapped.y());
                         firstMappedDown = mapped;
                     }
                 }
@@ -758,6 +772,11 @@ public final class HardwareValidationTest {
         private void writeFull(EInkDisplayDriver display, BufferedImage image) {
             byte[] packed = packMonochrome(image);
             display.writeFrame(new MonochromeFrame(packed, RefreshMode.FULL)).join();
+        }
+
+        private void writeFast(EInkDisplayDriver display, BufferedImage image) {
+            byte[] packed = packMonochrome(image);
+            display.writeFrame(new MonochromeFrame(packed, RefreshMode.FAST)).join();
         }
 
         // Writes the full packed frame using the partial waveform. Only pixels that

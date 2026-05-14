@@ -127,6 +127,7 @@ fi
 MODULE_PATH="$VALIDATION_JAR:$(ls "$LIB_DIR"/*.jar | tr '\n' ':')"
 
 java \
+  -ea \
   --module-path "$MODULE_PATH" \
   --enable-native-access=com.pi4j.plugin.ffm \
   -m dev.pux4j.ui.validation/dev.pux4j.ui.validation.HardwareValidationTest \

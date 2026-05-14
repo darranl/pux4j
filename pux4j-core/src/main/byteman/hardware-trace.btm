@@ -1,0 +1,47 @@
+# ByteMan hardware trace rules for pux4j-core driver internals.
+#
+# Intercepts the SSD1675A driver's sendCommand and sendData methods to produce
+# a compact, timestamped SPI-level trace without modifying production code.
+#
+# Each line is prefixed [HW-TRACE] for easy filtering:
+#   grep '\[HW-TRACE\]' <logfile>
+#
+# Usage: loaded via run-hardware-trace.sh in pux4j-validation.
+# Requires ByteMan 4.x and -javaagent byteman.jar on the JVM command line.
+
+# ─── sendCommand ─────────────────────────────────────────────────────────────
+# Intercepts sendCommand(byte cmd, byte... data) — logs the command byte
+# symbolically (see CMD_NAME helper below) plus any inline data bytes.
+
+RULE ssd1675a sendCommand entry
+CLASS dev.pux4j.ui.core.internal.ssd1675a.Ssd1675aDisplayDriver
+METHOD sendCommand(byte, byte[])
+AT ENTRY
+BIND ts     = java.lang.System.currentTimeMillis();
+     cmd    = (int)($1 & 0xFF);
+     dlen   = $2.length;
+     dhex   = dlen > 0 ? java.util.HexFormat.of().formatHex($2) : "(none)";
+     name   = dev.pux4j.ui.core.internal.ssd1675a.CmdNames.name($1)
+IF TRUE
+DO traceln("[HW-TRACE] " + ts + " CMD  0x" + java.lang.String.format("%02X", cmd)
+    + " (" + name + ")"
+    + " data[" + dlen + "]=" + dhex)
+ENDRULE
+
+# ─── sendData ────────────────────────────────────────────────────────────────
+# Intercepts sendData(byte[] data, int offset, int length) — logs direction,
+# length, and a compact preview of the first 16 bytes so large frame writes
+# are recognisable without flooding the trace log.
+
+RULE ssd1675a sendData entry
+CLASS dev.pux4j.ui.core.internal.ssd1675a.Ssd1675aDisplayDriver
+METHOD sendData(byte[], int, int)
+AT ENTRY
+BIND ts      = java.lang.System.currentTimeMillis();
+     preview = java.util.Arrays.copyOfRange($1, $2, java.lang.Math.min($2 + 16, $2 + $3));
+     hex     = java.util.HexFormat.of().formatHex(preview);
+     more    = $3 > 16 ? "..." : ""
+IF TRUE
+DO traceln("[HW-TRACE] " + ts + " DATA len=" + $3
+    + " preview=" + hex + more)
+ENDRULE

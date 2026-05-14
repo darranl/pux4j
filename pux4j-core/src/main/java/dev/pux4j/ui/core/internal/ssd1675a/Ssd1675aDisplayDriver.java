@@ -18,6 +18,8 @@ import dev.pux4j.ui.core.MonochromeFrame;
 import dev.pux4j.ui.core.Orientation;
 import dev.pux4j.ui.core.PixelFormat;
 import dev.pux4j.ui.core.RefreshMode;
+import dev.pux4j.ui.core.RefreshPolicy;
+import dev.pux4j.ui.core.RefreshStats;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -84,6 +86,37 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         0x22, 0x17, 0x41, (byte)0xB0, 0x32, 0x36
     };
 
+    // Fast full-refresh LUT — WF_FULL from WaveShare EPD_2in9_V2.c.
+    // 159 bytes: first 153 are the waveform payload loaded via CMD 0x32; the
+    // remaining 6 are voltage parameters applied via separate voltage commands
+    // (see loadFastLut()). This LUT is designed for a quick full refresh with
+    // no visible flash — it clears pixel voltage drift without the slow alternating
+    // waveform used by the OTP default full LUT. WaveShare's Init_Fast() uses it.
+    private static final byte[] WF_FULL = {
+        (byte)0x90, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // VS L0 1.00S
+        0x60,       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // VS L1
+        (byte)0x90, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // VS L2
+        0x60,       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // VS L3
+        0x00,       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // VS L4
+        // Group timing (12 groups × 7 bytes): TP[A],TP[B],TP[C],TP[D],SR,ENT,RP
+        0x19, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 0
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 1
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 2
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 3
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 4
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 5
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 6
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 7
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 8
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 9
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 10
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Group 11
+        // FR, XON (9 bytes)
+        0x24, 0x42, 0x22, 0x22, 0x23, 0x32, 0x00, 0x00, 0x00,
+        // Voltage bytes [153..158]: EOPT VGH VSH1 VSH2 VSL VCOM
+        0x22, 0x17, 0x41, (byte)0xAE, 0x32, 0x38
+    };
+
     // 4-gray LUT — 159 bytes; [153..158] are EOPT,VGH,VSH1,VSH2,VSL,VCOM
     private static final byte[] GRAY4_LUT = {
         0x00, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -112,10 +145,22 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
 
     private static final DisplayCapabilities CAPABILITIES = new DisplayCapabilities(
         EnumSet.of(PixelFormat.MONOCHROME, PixelFormat.FOUR_GRAY),
-        EnumSet.of(RefreshMode.FULL, RefreshMode.PARTIAL),
+        EnumSet.of(RefreshMode.FULL, RefreshMode.FAST, RefreshMode.PARTIAL),
         true,
         Optional.of(new AlignmentConstraints(8))
     );
+
+    static {
+        // Fail fast at class-load time if any LUT array was accidentally
+        // truncated or padded. Each must be exactly 159 bytes (153 waveform +
+        // 6 voltage bytes split by loadFastLut / loadGray4Lut).
+        assert WF_PARTIAL_2IN9_WAIT.length == 159
+            : "WF_PARTIAL_2IN9_WAIT must be 159 bytes, was " + WF_PARTIAL_2IN9_WAIT.length;
+        assert WF_FULL.length == 159
+            : "WF_FULL must be 159 bytes, was " + WF_FULL.length;
+        assert GRAY4_LUT.length == 159
+            : "GRAY4_LUT must be 159 bytes, was " + GRAY4_LUT.length;
+    }
 
     private final Orientation   orientation;
     private final Spi           spi;
@@ -128,6 +173,14 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     // the delta against what is actually displayed. The IC does not maintain
     // 0x26 reliably across our full↔partial mode transitions.
     private final byte[] lastFrameBytes = new byte[FRAME_BYTES];
+
+    // Refresh counters — reset to zero after every FULL refresh.
+    private int  partialRefreshCount  = 0;
+    private int  fastRefreshCount     = 0;
+    private long lastFullRefreshTimeMs;
+
+    // Policy evaluated before each writeFrame(); default never upgrades.
+    private RefreshPolicy refreshPolicy = RefreshPolicy.NEVER;
 
     Ssd1675aDisplayDriver(DriverConfig config) {
         var ctx  = config.pi4j();
@@ -173,12 +226,33 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
 
         // Display powers on with all pixels white; mirror that in the baseline cache.
         Arrays.fill(lastFrameBytes, (byte) 0xFF);
+        lastFullRefreshTimeMs = System.currentTimeMillis();
+
+        // Apply threshold policy from config if present.
+        int threshold = json.getInt("partialRefreshThreshold", 20);
+        if (threshold > 0) {
+            refreshPolicy = RefreshPolicy.afterPartials(threshold);
+        }
     }
 
     @Override public int getWidth()                        { return WIDTH; }
     @Override public int getHeight()                       { return HEIGHT; }
     @Override public Orientation getOrientation()          { return orientation; }
     @Override public DisplayCapabilities getCapabilities() { return CAPABILITIES; }
+
+    @Override
+    public RefreshStats getRefreshStats() {
+        return new RefreshStats(
+            partialRefreshCount,
+            fastRefreshCount,
+            System.currentTimeMillis() - lastFullRefreshTimeMs
+        );
+    }
+
+    @Override
+    public void setRefreshPolicy(RefreshPolicy policy) {
+        this.refreshPolicy = (policy != null) ? policy : RefreshPolicy.NEVER;
+    }
 
     @Override
     public void initialize() {
@@ -209,11 +283,17 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     @Override
     public CompletableFuture<Void> writeFrame(FrameData frame) {
         if (frame instanceof MonochromeFrame mf) {
-            return switch (mf.mode()) {
+            RefreshMode mode = mf.mode();
+            // Give the policy a chance to upgrade a PARTIAL or FAST to a FULL.
+            // The policy does not choose which FULL variant — the driver does.
+            if (refreshPolicy.shouldFullRefresh(getRefreshStats(), mode)) {
+                log.debug("writeFrame: policy upgraded {} → FULL", mode);
+                mode = RefreshMode.FULL;
+            }
+            return switch (mode) {
                 case FULL    -> writeFullFrame(mf.data());
+                case FAST    -> writeFastFrame(mf.data());
                 case PARTIAL -> writePartialFrame(mf.data());
-                case FAST    -> throw new UnsupportedOperationException(
-                    "SSD1675A does not support FAST refresh");
             };
         }
         if (frame instanceof FourGrayFrame fg) {
@@ -231,6 +311,12 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
             throw new UnsupportedOperationException("Unsupported frame type: " + frame.getClass());
         }
         log.debug("SSD1675A: writeRegion ({},{}) {}x{}", x, y, width, height);
+        assert x >= 0 && y >= 0 && width > 0 && height > 0
+            : "writeRegion: invalid region (x=" + x + ",y=" + y + ",w=" + width + ",h=" + height + ")";
+        assert x + width <= WIDTH
+            : "writeRegion: x+width (" + (x + width) + ") exceeds WIDTH (" + WIDTH + ")";
+        assert y + height <= HEIGHT
+            : "writeRegion: y+height (" + (y + height) + ") exceeds HEIGHT (" + HEIGHT + ")";
         waitBusy();
         partialInit();
         setWindow(x, y, x + width - 1, y + height - 1);
@@ -246,6 +332,8 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     // --- Frame write helpers ---
 
     private CompletableFuture<Void> writeFullFrame(byte[] data) {
+        assert data != null && data.length == FRAME_BYTES
+            : "writeFullFrame: expected " + FRAME_BYTES + " bytes, got " + (data == null ? "null" : data.length);
         log.debug("writeFullFrame: begin ({} bytes, fullModeConfigured={})", data.length, fullModeConfigured);
         waitBusy();
         if (!fullModeConfigured) {
@@ -275,11 +363,36 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         sendCommand(CMD_ACTIVATE);
         waitBusy();
         System.arraycopy(data, 0, lastFrameBytes, 0, FRAME_BYTES);
+        resetRefreshCounters();
         log.debug("writeFullFrame: complete");
         return CompletableFuture.completedFuture(null);
     }
 
+    private CompletableFuture<Void> writeFastFrame(byte[] data) {
+        log.debug("writeFastFrame: begin ({} bytes)", data.length);
+        waitBusy();
+        fastInit();
+        setFullWindow();
+        log.debug("writeFastFrame: writing 0x24 BW RAM");
+        sendCommand(CMD_WRITE_BW_RAM);
+        sendData(data);
+        setCursor(0, 0);
+        log.debug("writeFastFrame: writing 0x26 RED RAM (baseline for partial)");
+        sendCommand(CMD_WRITE_RED_RAM);
+        sendData(data);
+        log.debug("writeFastFrame: activate full update (DUC2=0xF7)");
+        sendCommand(CMD_DISP_UPDATE_2, (byte)0xF7);
+        sendCommand(CMD_ACTIVATE);
+        waitBusy();
+        System.arraycopy(data, 0, lastFrameBytes, 0, FRAME_BYTES);
+        resetRefreshCounters();
+        log.debug("writeFastFrame: complete");
+        return CompletableFuture.completedFuture(null);
+    }
+
     private CompletableFuture<Void> writePartialFrame(byte[] data) {
+        assert data != null && data.length == FRAME_BYTES
+            : "writePartialFrame: expected " + FRAME_BYTES + " bytes, got " + (data == null ? "null" : data.length);
         log.debug("writePartialFrame: begin ({} bytes)", data.length);
         waitBusy();
         partialInit();
@@ -292,7 +405,8 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         sendCommand(CMD_ACTIVATE);
         waitBusy();
         System.arraycopy(data, 0, lastFrameBytes, 0, FRAME_BYTES);
-        log.debug("writePartialFrame: complete");
+        partialRefreshCount++;
+        log.debug("writePartialFrame: complete (partialCount={})", partialRefreshCount);
         return CompletableFuture.completedFuture(null);
     }
 
@@ -352,6 +466,50 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         log.debug("partialInit: complete");
     }
 
+    private void fastInit() {
+        // Mirrors WaveShare EPD_2IN9_V2_Init_Fast(): hardware reset + SW_RESET +
+        // standard register init + custom WF_FULL LUT loaded via LUT_by_host().
+        // Border waveform 0x05 (vs 0x80 for slow FULL) is what WaveShare specifies
+        // for the fast path — do not change without re-testing on hardware.
+        log.debug("fastInit: begin");
+        fullModeConfigured = true;
+        hardwareReset();
+        delay(100);
+        waitBusy();
+        sendCommand(CMD_SW_RESET);
+        waitBusy();
+        sendCommand(CMD_DRIVER_OUTPUT,   (byte)0x27, (byte)0x01, (byte)0x00);
+        sendCommand(CMD_DATA_ENTRY_MODE, (byte)0x03);
+        setFullWindow();
+        sendCommand(CMD_BORDER_WAVEFORM, (byte)0x05);
+        sendCommand(CMD_DISP_UPDATE_1,   (byte)0x00, (byte)0x80);
+        setCursor(0, 0);
+        waitBusy();
+        loadFastLut();
+        log.debug("fastInit: complete");
+    }
+
+    /**
+     * Loads the WF_FULL fast LUT via the LUT_by_host protocol from WaveShare's
+     * EPD_2in9_V2.c. The 159-byte WF_FULL array is split: the first 153 bytes go
+     * to CMD 0x32 (CMD_WRITE_LUT), and the trailing 6 voltage bytes are sent via
+     * dedicated voltage commands. This split is mandatory — the voltage registers
+     * (EOPT, gate voltage, source voltage, VCOM) are separate from the waveform
+     * RAM and must be programmed individually for the fast LUT to take effect.
+     */
+    private void loadFastLut() {
+        log.debug("loadFastLut: sending 153-byte WF_FULL waveform via CMD 0x32");
+        sendCommand(CMD_WRITE_LUT);
+        sendData(WF_FULL, 0, 153);
+        waitBusy();
+        // Voltage bytes [153..158]: EOPT, VGH, VSH1, VSH2, VSL, VCOM
+        sendCommand(CMD_EOPT,           WF_FULL[153]);
+        sendCommand(CMD_GATE_VOLTAGE,   WF_FULL[154]);
+        sendCommand(CMD_SOURCE_VOLTAGE, WF_FULL[155], WF_FULL[156], WF_FULL[157]);
+        sendCommand(CMD_VCOM,           WF_FULL[158]);
+        log.debug("loadFastLut: complete");
+    }
+
     private void fourGrayInit() {
         log.debug("SSD1675A: fourGrayInit");
         fullModeConfigured = false;
@@ -394,6 +552,12 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         setCursor(0, 0);
         waitBusy();
         fullModeConfigured = true;
+    }
+
+    private void resetRefreshCounters() {
+        partialRefreshCount  = 0;
+        fastRefreshCount     = 0;
+        lastFullRefreshTimeMs = System.currentTimeMillis();
     }
 
     // --- SPI and GPIO helpers ---
@@ -461,12 +625,29 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     }
 
     private void sendData(byte[] data, int offset, int length) {
+        assert data != null                        : "sendData: data must not be null";
+        assert offset >= 0                         : "sendData: offset must be >= 0, was " + offset;
+        assert length >= 0                         : "sendData: length must be >= 0, was " + length;
+        assert offset + length <= data.length      : "sendData: offset+length (" + (offset + length)
+                                                     + ") exceeds data.length (" + data.length + ")";
         dc.state(DigitalState.HIGH);
         int remaining = length;
         int pos = offset;
         while (remaining > 0) {
             int chunk = Math.min(remaining, SPI_CHUNK);
-            spi.transfer(data, pos, chunk);
+            // Pi4J's Spi.transfer(byte[], int, int) delegates internally to
+            // transfer(buf, off, buf, off, len) — the same array is passed as
+            // both the write and read buffer. The FFM backend then copies the
+            // full-duplex SPI read-back bytes (zeros from the eInk display)
+            // back into that same array via System.arraycopy, corrupting it
+            // in-place after every ioctl chunk. For a 4736-byte frame split
+            // into 4096+640 chunks, the first chunk zeroes data[0..4095], so
+            // the second RAM-plane write and all subsequent calls receive zeros
+            // instead of the intended pixel data.
+            //
+            // Fix: copy each chunk before transfer so the source array is never
+            // used as the read destination.
+            spi.transfer(Arrays.copyOfRange(data, pos, pos + chunk));
             pos       += chunk;
             remaining -= chunk;
         }

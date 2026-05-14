@@ -3,10 +3,28 @@ package dev.pux4j.ui.core;
 
 /**
  * Maps raw touch IC coordinates to display logical coordinates.
- * The touch IC reports coordinates in its own native space (which may differ in
- * origin, axis direction, and scale from the display's logical space).
- * Mapping parameters are confirmed against the WaveShare demo code and validated
- * with physical corner-touch calibration during Phase 2 implementation.
+ *
+ * <p>The touch IC reports coordinates in its own native space (which may differ in
+ * origin, axis direction, and scale from the display's logical space). This mapper
+ * applies three transforms in order:
+ * <ol>
+ *   <li><strong>swapAxes</strong> — swap X and Y before any other transform (needed when
+ *       the IC's X axis maps to the display's Y axis, e.g. some landscape-mounted panels).</li>
+ *   <li><strong>flipX / flipY</strong> — reflect each axis: {@code x = nativeWidth - 1 - x}
+ *       (needed when the IC origin is at the opposite corner from the display origin).</li>
+ *   <li><strong>Scale</strong> — linear scale from native resolution to logical pixels.</li>
+ * </ol>
+ *
+ * <p>Correct parameter values for the WaveShare 2.9" V2 HAT (ICNT86X, landscape):
+ * <pre>
+ *   touchNativeWidth  = 296  (IC reports pixel coords in display's X range)
+ *   touchNativeHeight = 128  (IC reports pixel coords in display's Y range)
+ *   flipX = true, flipY = true  (IC origin is at bottom-right in landscape)
+ *   swapAxes = false
+ * </pre>
+ *
+ * <p>Calibrate by running the hardware validation test corner-touch scenarios and
+ * adjusting flipX/flipY/swapAxes until all four corners register correctly.
  */
 public final class TouchCoordinateMapper {
 
@@ -22,6 +40,10 @@ public final class TouchCoordinateMapper {
             int displayWidth, int displayHeight,
             int touchNativeWidth, int touchNativeHeight,
             boolean flipX, boolean flipY, boolean swapAxes) {
+        assert displayWidth  > 0 : "displayWidth must be > 0";
+        assert displayHeight > 0 : "displayHeight must be > 0";
+        assert touchNativeWidth  > 0 : "touchNativeWidth must be > 0";
+        assert touchNativeHeight > 0 : "touchNativeHeight must be > 0";
         this.displayWidth     = displayWidth;
         this.displayHeight    = displayHeight;
         this.touchNativeWidth  = touchNativeWidth;
