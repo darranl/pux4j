@@ -76,7 +76,7 @@ public final class DisplaySmokeTest {
             ROW_BYTES = (WIDTH + 7) / 8;  // Ceiling division: ceil(WIDTH / 8)
             FRAME_BYTES = ROW_BYTES * HEIGHT;
             CENTER_ROW = HEIGHT / 2;
-            CENTER_BYTE = ROW_BYTES / 2;
+            CENTER_BYTE = (WIDTH / 2) / 8;  // Center pixel position converted to byte index
             
             // Scale block sizes proportionally to display height
             // Outer block should be visually prominent, inner creates border effect
