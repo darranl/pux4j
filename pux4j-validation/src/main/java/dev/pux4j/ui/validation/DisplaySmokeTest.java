@@ -116,8 +116,26 @@ public final class DisplaySmokeTest {
             banner("Step 3: PARTIAL refresh — solid black centre block");
             log.info("OBSERVE (landscape): solid black rectangle appears in centre; stripes unchanged around it");
             byte[] overlayB1 = stripes.clone();
-            solidBlock(overlayB1, CENTER_ROW - BLOCK_HALF_ROWS, BLOCK_HALF_ROWS * 2,
-                                  CENTER_BYTE - BLOCK_HALF_BYTES, BLOCK_HALF_BYTES * 2);
+            
+            // Log block dimensions and positions for verification
+            int blockStartRow = CENTER_ROW - BLOCK_HALF_ROWS;
+            int blockNumRows = BLOCK_HALF_ROWS * 2;
+            int blockStartByte = CENTER_BYTE - BLOCK_HALF_BYTES;
+            int blockNumBytes = BLOCK_HALF_BYTES * 2;
+            log.info("Step 3 block: rows [{}, {}), bytes [{}, {})",
+                blockStartRow, blockStartRow + blockNumRows,
+                blockStartByte, blockStartByte + blockNumBytes);
+            
+            solidBlock(overlayB1, blockStartRow, blockNumRows, blockStartByte, blockNumBytes);
+            
+            // Verify the block was filled correctly - check center row, center byte
+            int centerRowOffset = CENTER_ROW * ROW_BYTES + CENTER_BYTE;
+            byte centerValue = overlayB1[centerRowOffset];
+            log.info("Step 3 verification: center byte (row={}, byte={}, offset={}) = 0x{} (expect 0x00)",
+                CENTER_ROW, CENTER_BYTE, centerRowOffset, String.format("%02X", centerValue & 0xFF));
+            assert centerValue == (byte)0x00 : "Center of block should be black (0x00), was: 0x" + 
+                String.format("%02X", centerValue & 0xFF);
+            
             doPartial(driver, overlayB1, "centre block — solid black");
             sleepWithProgress(4_000, "observe step 3");
 
@@ -147,8 +165,26 @@ public final class DisplaySmokeTest {
             banner("Step 6: PARTIAL refresh — white centre window on checker");
             log.info("OBSERVE (landscape): solid white rectangle appears in centre; checker unchanged around it");
             byte[] overlayC1 = checker.clone();
-            whiteBlock(overlayC1, CENTER_ROW - BLOCK_HALF_ROWS, BLOCK_HALF_ROWS * 2,
-                                  CENTER_BYTE - BLOCK_HALF_BYTES, BLOCK_HALF_BYTES * 2);
+            
+            int whiteBlockStartRow = CENTER_ROW - BLOCK_HALF_ROWS;
+            int whiteBlockNumRows = BLOCK_HALF_ROWS * 2;
+            int whiteBlockStartByte = CENTER_BYTE - BLOCK_HALF_BYTES;
+            int whiteBlockNumBytes = BLOCK_HALF_BYTES * 2;
+            log.info("Step 6 white block: rows [{}, {}), bytes [{}, {})",
+                whiteBlockStartRow, whiteBlockStartRow + whiteBlockNumRows,
+                whiteBlockStartByte, whiteBlockStartByte + whiteBlockNumBytes);
+            
+            whiteBlock(overlayC1, whiteBlockStartRow, whiteBlockNumRows, 
+                       whiteBlockStartByte, whiteBlockNumBytes);
+            
+            // Verify the white block was filled correctly
+            int whiteCenterOffset = CENTER_ROW * ROW_BYTES + CENTER_BYTE;
+            byte whiteCenterValue = overlayC1[whiteCenterOffset];
+            log.info("Step 6 verification: center byte (row={}, byte={}, offset={}) = 0x{} (expect 0xFF)",
+                CENTER_ROW, CENTER_BYTE, whiteCenterOffset, String.format("%02X", whiteCenterValue & 0xFF));
+            assert whiteCenterValue == (byte)0xFF : "Center of white block should be white (0xFF), was: 0x" + 
+                String.format("%02X", whiteCenterValue & 0xFF);
+            
             doPartial(driver, overlayC1, "centre window — white on checker");
             sleepWithProgress(4_000, "observe step 6");
 
