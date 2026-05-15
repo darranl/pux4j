@@ -239,8 +239,9 @@ public final class DisplaySmokeTest {
      * (landscape top-bottom axis, each byte = 8 pixels).
      */
     private static void solidBlock(byte[] f, int startRow, int numRows, int startByte, int numBytes) {
+        int endByte = Math.min(startByte + numBytes, ROW_BYTES);  // Don't overflow into next row
         for (int row = startRow; row < startRow + numRows; row++) {
-            Arrays.fill(f, row * ROW_BYTES + startByte, row * ROW_BYTES + startByte + numBytes, (byte) 0x00);
+            Arrays.fill(f, row * ROW_BYTES + startByte, row * ROW_BYTES + endByte, (byte) 0x00);
         }
     }
 
@@ -249,8 +250,9 @@ public final class DisplaySmokeTest {
      * Parameters as per {@link #solidBlock}.
      */
     private static void whiteBlock(byte[] f, int startRow, int numRows, int startByte, int numBytes) {
+        int endByte = Math.min(startByte + numBytes, ROW_BYTES);  // Don't overflow into next row
         for (int row = startRow; row < startRow + numRows; row++) {
-            Arrays.fill(f, row * ROW_BYTES + startByte, row * ROW_BYTES + startByte + numBytes, (byte) 0xFF);
+            Arrays.fill(f, row * ROW_BYTES + startByte, row * ROW_BYTES + endByte, (byte) 0xFF);
         }
     }
 

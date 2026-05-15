@@ -358,6 +358,13 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             }
 
             waitBusy();
+            
+            // Write previous frame to 0x26 (RED RAM) for delta comparison
+            setCursor(0, 0);
+            sendCommand(CMD_WRITE_RED_RAM);
+            sendData(lastFrameBytes);
+            
+            // Write new frame to 0x24 (BW RAM)
             setCursor(0, 0);
             sendCommand(CMD_WRITE_BW_RAM);
             sendData(data);
