@@ -15,45 +15,37 @@ import java.util.Arrays;
 import java.util.ServiceLoader;
 
 /**
- * Phase 1a hardware smoke test: exercises all three refresh modes
+ * Phase 1 hardware smoke test: exercises all three refresh modes
  * (FULL, FAST, PARTIAL) across a 7-step sequence.
  *
- * Run on Pi 500+ with the 2.9" V2 HAT attached in <em>landscape</em> orientation
- * (long edge horizontal, USB ports on the right).
+ * Supports both 2.9" V2 (SSD1675A) and 2.13" V4 (SSD1680) displays.
+ * Display dimensions are queried from the driver at runtime.
  *
  * Usage: java -ea -m dev.pux4j.ui.validation/dev.pux4j.ui.validation.DisplaySmokeTest [driver]
- *   driver defaults to "ssd1675a"
+ *   driver: "ssd1675a" (2.9" V2) or "ssd1680" (2.13" V4)
  *
  * <p><strong>Framebuffer coordinate system (landscape viewing):</strong><br>
- * The SSD1675A framebuffer is natively 128 wide × 296 tall (portrait IC layout).
- * When the HAT is held landscape (long edge horizontal):
+ * The framebuffer is natively portrait (narrow × tall). When viewed in landscape:
  * <ul>
- *   <li>Framebuffer <em>row</em> (0..295) → left-to-right axis on the panel.</li>
- *   <li>Framebuffer <em>column byte</em> (0..15, each covering 8 pixels) → top-to-bottom axis.</li>
+ *   <li>Framebuffer <em>row</em> → left-to-right axis on the panel.</li>
+ *   <li>Framebuffer <em>column byte</em> (each covering 8 pixels) → top-to-bottom axis.</li>
  * </ul>
- * So {@code solidRows(f, 100, 96)} paints a 96-pixel-wide vertical band centred
- * on the panel when viewed in landscape, and {@code solidBlock(f, r, h, 6, 4)}
- * paints a rectangle 32 px tall positioned in the vertical centre.
  */
 public final class DisplaySmokeTest {
 
     private static final Logger log = LoggerFactory.getLogger(DisplaySmokeTest.class);
 
-    // Native IC framebuffer dimensions (portrait layout).
-    // In landscape view: HEIGHT pixels wide, WIDTH pixels tall.
-    private static final int WIDTH       = 128;
-    private static final int HEIGHT      = 296;
-    private static final int ROW_BYTES   = WIDTH / 8;   // 16 bytes per row
-    private static final int FRAME_BYTES = ROW_BYTES * HEIGHT; // 4736
-
-    // Centre of the frame in landscape coordinates.
-    private static final int CENTER_ROW      = HEIGHT / 2;          // 148
-    private static final int CENTER_BYTE     = ROW_BYTES / 2;       //   8
-    // Dimensions for centre overlay blocks (landscape pixels).
-    private static final int BLOCK_HALF_ROWS = 48;                  // ±48 → 96 px wide
-    private static final int BLOCK_HALF_BYTES = 3;                  // ±3  → 6 bytes = 48 px tall
-    private static final int INNER_HALF_ROWS = 32;                  // hollow-box interior
-    private static final int INNER_HALF_BYTES = 2;
+    // Display dimensions — populated from driver after initialization
+    private static int WIDTH;
+    private static int HEIGHT;
+    private static int ROW_BYTES;
+    private static int FRAME_BYTES;
+    private static int CENTER_ROW;
+    private static int CENTER_BYTE;
+    private static int BLOCK_HALF_ROWS;
+    private static int BLOCK_HALF_BYTES;
+    private static int INNER_HALF_ROWS;
+    private static int INNER_HALF_BYTES;
 
     public static void main(String[] args) throws Exception {
         String driverName = args.length > 0 ? args[0] : "ssd1675a";
@@ -77,6 +69,28 @@ public final class DisplaySmokeTest {
             long initStart = System.nanoTime();
             driver.initialize();
             log.info("initialize complete in {} ms", elapsedMs(initStart));
+
+            // Query display dimensions and compute layout constants
+            WIDTH = driver.getWidth();
+            HEIGHT = driver.getHeight();
+            ROW_BYTES = WIDTH / 8;
+            FRAME_BYTES = ROW_BYTES * HEIGHT;
+            CENTER_ROW = HEIGHT / 2;
+            CENTER_BYTE = ROW_BYTES / 2;
+            
+            // Scale block sizes proportionally to display height
+            // 2.9" (296px): block=96px (32%), inner=64px (22%)
+            // 2.13" (250px): block=80px (32%), inner=54px (22%)
+            BLOCK_HALF_ROWS = (int)(HEIGHT * 0.16);  // 16% of height on each side = 32% total
+            BLOCK_HALF_BYTES = (int)(ROW_BYTES * 0.19); // ~19% of width on each side
+            INNER_HALF_ROWS = (int)(HEIGHT * 0.11);  // 11% of height on each side = 22% total
+            INNER_HALF_BYTES = (int)(ROW_BYTES * 0.125); // ~12.5% of width on each side
+            
+            log.info("display dimensions = {}x{} native ({} bytes per frame)", WIDTH, HEIGHT, FRAME_BYTES);
+            log.info("landscape view: {}px wide x {}px tall", HEIGHT, WIDTH);
+            log.info("block dimensions: {}x{} px, inner: {}x{} px",
+                BLOCK_HALF_ROWS * 2, BLOCK_HALF_BYTES * 8,
+                INNER_HALF_ROWS * 2, INNER_HALF_BYTES * 8);
 
             // ── Step 1: FULL slow — three-bar marker ──────────────────────────
             // Three evenly-spaced vertical bars in landscape: left edge, centre,
@@ -173,14 +187,14 @@ public final class DisplaySmokeTest {
 
     /**
      * Three evenly-spaced 16-pixel-wide black vertical bars on a white background,
-     * as seen in landscape. Left edge bar: rows 0..15; centre bar: rows 140..155;
-     * right edge bar: rows 280..295.
+     * as seen in landscape. Scaled to display height.
      */
     private static byte[] threeBarMarker() {
         byte[] f = allWhite();
-        solidRows(f, 0,           16);
-        solidRows(f, CENTER_ROW - 8, 16);
-        solidRows(f, HEIGHT - 16, 16);
+        int barWidth = Math.max(16, HEIGHT / 18); // ~16px on 2.9", ~14px on 2.13"
+        solidRows(f, 0, barWidth);
+        solidRows(f, CENTER_ROW - barWidth/2, barWidth);
+        solidRows(f, HEIGHT - barWidth, barWidth);
         return f;
     }
 
