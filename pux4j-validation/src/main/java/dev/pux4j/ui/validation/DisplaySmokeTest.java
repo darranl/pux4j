@@ -79,12 +79,13 @@ public final class DisplaySmokeTest {
             CENTER_BYTE = ROW_BYTES / 2;
             
             // Scale block sizes proportionally to display height
-            // 2.9" (296px): block=96px (32%), inner=64px (22%)
-            // 2.13" (250px): block=80px (32%), inner=54px (22%)
+            // Outer block should be visually prominent, inner creates border effect
             BLOCK_HALF_ROWS = (int)(HEIGHT * 0.16);  // 16% of height on each side = 32% total
             BLOCK_HALF_BYTES = (int)(ROW_BYTES * 0.19); // ~19% of width on each side
-            INNER_HALF_ROWS = (int)(HEIGHT * 0.11);  // 11% of height on each side = 22% total
-            INNER_HALF_BYTES = (int)(ROW_BYTES * 0.125); // ~12.5% of width on each side
+            
+            // Inner block: inset by 1 byte (8 pixels) on each side to create visible border
+            INNER_HALF_ROWS = BLOCK_HALF_ROWS - (BLOCK_HALF_ROWS / 4);  // ~75% of outer block height
+            INNER_HALF_BYTES = Math.max(1, BLOCK_HALF_BYTES - 1);  // 1 byte inset from outer block
             
             log.info("display dimensions = {}x{} native ({} bytes per frame)", WIDTH, HEIGHT, FRAME_BYTES);
             log.info("landscape view: {}px wide x {}px tall", HEIGHT, WIDTH);
