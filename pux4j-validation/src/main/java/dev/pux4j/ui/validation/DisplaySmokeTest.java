@@ -73,7 +73,7 @@ public final class DisplaySmokeTest {
             // Query display dimensions and compute layout constants
             WIDTH = driver.getWidth();
             HEIGHT = driver.getHeight();
-            ROW_BYTES = WIDTH / 8;
+            ROW_BYTES = (WIDTH + 7) / 8;  // Ceiling division: ceil(WIDTH / 8)
             FRAME_BYTES = ROW_BYTES * HEIGHT;
             CENTER_ROW = HEIGHT / 2;
             CENTER_BYTE = ROW_BYTES / 2;
