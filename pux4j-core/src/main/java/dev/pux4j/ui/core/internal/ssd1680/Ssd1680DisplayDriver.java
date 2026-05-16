@@ -65,7 +65,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
     private final DigitalOutput dc;
     private final DigitalOutput rst;
     private final DigitalInput  busy;
-    private boolean fullModeConfigured;
+    private boolean partialModeConfigured;
     private final byte[] lastFrameBytes = new byte[FRAME_BYTES];
 
     private int  partialRefreshCount  = 0;
@@ -200,7 +200,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         assert (x % 8) == 0 : "x must be a multiple of 8 for SSD1680 alignment";
 
         return CompletableFuture.runAsync(() -> {
-            if (fullModeConfigured) {
+            if (!partialModeConfigured) {
                 configurePartialRefreshMode();
             }
 
@@ -244,7 +244,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         sendData((byte) 0x80);
         waitBusy();
 
-        fullModeConfigured = true;
+        partialModeConfigured = false;
     }
 
     private void configureFastRefreshMode() {
@@ -275,7 +275,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         sendCommand(CMD_ACTIVATE);
         waitBusy();
 
-        fullModeConfigured = false;
+        partialModeConfigured = false;
     }
 
     private void configurePartialRefreshMode() {
@@ -295,16 +295,14 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         setWindow(0, 0, WIDTH - 1, HEIGHT - 1);
         setCursor(0, 0);
 
-        fullModeConfigured = false;
+        partialModeConfigured = true;
     }
 
     private CompletableFuture<Void> writeFullFrame(byte[] data) {
         assert data.length == FRAME_BYTES : "Frame must be " + FRAME_BYTES + " bytes, was " + data.length;
 
         return CompletableFuture.runAsync(() -> {
-            if (!fullModeConfigured) {
-                configureFullRefreshMode();
-            }
+            configureFullRefreshMode();
 
             waitBusy();
             setCursor(0, 0);
@@ -359,12 +357,12 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         assert data.length == FRAME_BYTES : "Frame must be " + FRAME_BYTES + " bytes, was " + data.length;
 
         return CompletableFuture.runAsync(() -> {
-            if (fullModeConfigured) {
+            if (!partialModeConfigured) {
                 configurePartialRefreshMode();
             }
 
             waitBusy();
-            
+
             // Write previous frame to 0x26 (RED RAM) for delta comparison
             setCursor(0, 0);
             sendCommand(CMD_WRITE_RED_RAM);
