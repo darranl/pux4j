@@ -1,47 +1,58 @@
 # ByteMan hardware trace rules for pux4j-core driver internals.
 #
-# Intercepts the SSD1675A driver's sendCommand and sendData methods to produce
+# Intercepts display driver sendCommand and sendData methods to produce
 # a compact, timestamped SPI-level trace without modifying production code.
+#
+# Supports: SSD1675A, SSD1680
 #
 # Each line is prefixed [HW-TRACE] for easy filtering:
 #   grep '\[HW-TRACE\]' <logfile>
 #
-# Usage: loaded via run-hardware-trace.sh in pux4j-validation.
+# Usage: loaded via pux4j-smoke-test-byteman wrapper on littleraspberry.
 # Requires ByteMan 4.x and -javaagent byteman.jar on the JVM command line.
 
-# ─── sendCommand ─────────────────────────────────────────────────────────────
-# Intercepts sendCommand(byte cmd, byte... data) — logs the command byte
-# symbolically (see CMD_NAME helper below) plus any inline data bytes.
+# ─── SSD1675A ────────────────────────────────────────────────────────────────
 
 RULE ssd1675a sendCommand entry
 CLASS dev.pux4j.ui.core.internal.ssd1675a.Ssd1675aDisplayDriver
 METHOD sendCommand(byte, byte[])
 AT ENTRY
-BIND ts     = java.lang.System.currentTimeMillis();
-     cmd    = (int)($1 & 0xFF);
-     dlen   = $2.length;
-     dhex   = dlen > 0 ? java.util.HexFormat.of().formatHex($2) : "(none)";
-     name   = dev.pux4j.ui.core.internal.ssd1675a.CmdNames.name($1)
+BIND ts   = java.lang.System.currentTimeMillis();
+     hex  = java.util.HexFormat.of().toHexDigits($1);
+     dlen = $2.length;
+     dhex = (dlen > 0) ? java.util.HexFormat.of().formatHex($2) : "(none)"
 IF TRUE
-DO traceln("[HW-TRACE] " + ts + " CMD  0x" + java.lang.String.format("%02X", cmd)
-    + " (" + name + ")"
-    + " data[" + dlen + "]=" + dhex)
+DO traceln("[HW-TRACE] " + ts + " CMD  0x" + hex + " (" + dev.pux4j.ui.core.internal.ssd1675a.CmdNames.name($1) + ") data[" + dlen + "]=" + dhex)
 ENDRULE
-
-# ─── sendData ────────────────────────────────────────────────────────────────
-# Intercepts sendData(byte[] data, int offset, int length) — logs direction,
-# length, and a compact preview of the first 16 bytes so large frame writes
-# are recognisable without flooding the trace log.
 
 RULE ssd1675a sendData entry
 CLASS dev.pux4j.ui.core.internal.ssd1675a.Ssd1675aDisplayDriver
 METHOD sendData(byte[], int, int)
 AT ENTRY
-BIND ts      = java.lang.System.currentTimeMillis();
-     preview = java.util.Arrays.copyOfRange($1, $2, java.lang.Math.min($2 + 16, $2 + $3));
-     hex     = java.util.HexFormat.of().formatHex(preview);
-     more    = $3 > 16 ? "..." : ""
+BIND ts  = java.lang.System.currentTimeMillis();
+     hex = java.util.HexFormat.of().formatHex($1, $2, $2 + $3)
 IF TRUE
-DO traceln("[HW-TRACE] " + ts + " DATA len=" + $3
-    + " preview=" + hex + more)
+DO traceln("[HW-TRACE] " + ts + " DATA len=" + $3 + " " + hex)
+ENDRULE
+
+# ─── SSD1680 ─────────────────────────────────────────────────────────────────
+
+RULE ssd1680 sendCommand entry
+CLASS dev.pux4j.ui.core.internal.ssd1680.Ssd1680DisplayDriver
+METHOD sendCommand(byte)
+AT ENTRY
+BIND ts  = java.lang.System.currentTimeMillis();
+     hex = java.util.HexFormat.of().toHexDigits($1)
+IF TRUE
+DO traceln("[HW-TRACE] " + ts + " CMD  0x" + hex + " (" + dev.pux4j.ui.core.internal.ssd1680.CmdNames.name($1) + ")")
+ENDRULE
+
+RULE ssd1680 sendData entry
+CLASS dev.pux4j.ui.core.internal.ssd1680.Ssd1680DisplayDriver
+METHOD sendData(byte[])
+AT ENTRY
+BIND ts  = java.lang.System.currentTimeMillis();
+     hex = java.util.HexFormat.of().formatHex($1)
+IF TRUE
+DO traceln("[HW-TRACE] " + ts + " DATA len=" + $1.length + " " + hex)
 ENDRULE

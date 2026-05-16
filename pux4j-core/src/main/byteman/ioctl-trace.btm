@@ -1,0 +1,102 @@
+# ByteMan ioctl-level trace for SSD1680 hardware debugging.
+#
+# Intercepts at the Pi4J FFM layer — one step above the actual ioctl() call —
+# to capture the exact bytes that leave the JVM toward the Linux SPI/GPIO devices.
+# This is independent of our driver code, so it captures what the hardware actually
+# receives regardless of any driver-level bugs.
+#
+# Call chain:
+#   Ssd1680DisplayDriver.sendCommand(byte) → dc.low()  → spi.write()    →  FFMSpi.transfer()
+#   Ssd1680DisplayDriver.sendData(byte[])  → dc.high() → spi.transfer() →  FFMSpi.transfer()
+#                                          ↓                              ↓
+#                              FFMDigitalOutput.state()              IoctlNative.call(SPI_IOC_MESSAGE)
+#                              → ioctl(GPIO_V2_SET_VALUES_IOCTL)     → kernel SPI driver → hardware
+#
+# Intercepted:
+#   FFMDigitalOutput.state(DigitalState)  — BCM 25 (DC pin) and BCM 17 (RST pin)
+#   FFMSpi.transfer(byte[], int, byte[], int, int)  — all SPI byte transfers
+#
+# DC state tracking uses a ByteMan global flag (SSD1680_DC_HIGH):
+#   DC LOW  (CMD mode) → flag cleared → SPI transfer logged as "CMD "
+#   DC HIGH (DATA mode) → flag set    → SPI transfer logged as "DATA"
+# This works because SSD1680 operations are sequential: DC is set immediately
+# before each SPI write and never interleaved across threads.
+#
+# Output format:
+#   [IOCTL] <millis> GPIO BCM=25 → LOW  (CMD mode)
+#   [IOCTL] <millis> SPI  CMD  len=1 44
+#   [IOCTL] <millis> GPIO BCM=25 → HIGH (DATA mode)
+#   [IOCTL] <millis> SPI  DATA len=2 000f
+#   [IOCTL] <millis> GPIO BCM=17 → LOW (RST)
+#
+# Filter all trace lines:
+#   grep '\[IOCTL\]' <logfile>
+#
+# Reconstruct command sequences:
+#   grep '\[IOCTL\]' <logfile> | awk '/CMD /{cmd=$NF} /DATA/{print cmd, $0}'
+#
+# Usage: loaded via pux4j-smoke-test --enable-ioctl-trace on littleraspberry.
+# Requires ByteMan 4.x and -javaagent:byteman.jar on the JVM command line.
+# No --add-opens required: all accessed methods are public API.
+
+# ─── GPIO DC pin (BCM 25) — CMD mode (DC LOW) ────────────────────────────────
+
+RULE ioctl DC LOW - command mode
+CLASS com.pi4j.plugin.ffm.providers.gpio.FFMDigitalOutput
+METHOD state(com.pi4j.io.gpio.digital.DigitalState)
+AT ENTRY
+BIND bcm = java.lang.Integer.parseInt($0.config().properties().get("bcm").toString());
+     ts  = java.lang.System.currentTimeMillis()
+IF bcm == 25 && $1.getValue().intValue() == 0
+DO
+  traceln("[IOCTL] " + ts + " GPIO BCM=25 → LOW  (CMD mode)");
+  clear("SSD1680_DC_HIGH")
+ENDRULE
+
+# ─── GPIO DC pin (BCM 25) — DATA mode (DC HIGH) ──────────────────────────────
+
+RULE ioctl DC HIGH - data mode
+CLASS com.pi4j.plugin.ffm.providers.gpio.FFMDigitalOutput
+METHOD state(com.pi4j.io.gpio.digital.DigitalState)
+AT ENTRY
+BIND bcm = java.lang.Integer.parseInt($0.config().properties().get("bcm").toString());
+     ts  = java.lang.System.currentTimeMillis()
+IF bcm == 25 && $1.getValue().intValue() == 1
+DO
+  traceln("[IOCTL] " + ts + " GPIO BCM=25 → HIGH (DATA mode)");
+  flag("SSD1680_DC_HIGH")
+ENDRULE
+
+# ─── GPIO RST pin (BCM 17) — hardware reset events ───────────────────────────
+
+RULE ioctl RST pin
+CLASS com.pi4j.plugin.ffm.providers.gpio.FFMDigitalOutput
+METHOD state(com.pi4j.io.gpio.digital.DigitalState)
+AT ENTRY
+BIND bcm   = java.lang.Integer.parseInt($0.config().properties().get("bcm").toString());
+     ts    = java.lang.System.currentTimeMillis();
+     level = ($1.getValue().intValue() == 0) ? "LOW " : "HIGH"
+IF bcm == 17
+DO traceln("[IOCTL] " + ts + " GPIO BCM=17 → " + level + " (RST)")
+ENDRULE
+
+# ─── SPI transfer — all bytes sent over SPI ──────────────────────────────────
+#
+# FFMSpi.transfer(byte[] write, int writeOffset, byte[] read, int readOffset, int numberOfBytes)
+#   $1 = write buffer   $2 = writeOffset   $5 = numberOfBytes
+#
+# Full hex dump of the transferred bytes. For frame writes (4000 bytes) this
+# produces an ~8000-character hex string per line. That is intentional: the
+# complete payload is needed to reconstruct what the display receives.
+# Large lines are easily handled by post-processing tools (awk, python, etc.).
+
+RULE ioctl SPI transfer
+CLASS com.pi4j.plugin.ffm.providers.spi.FFMSpi
+METHOD transfer(byte[], int, byte[], int, int)
+AT ENTRY
+BIND ts   = java.lang.System.currentTimeMillis();
+     mode = flagged("SSD1680_DC_HIGH") ? "DATA" : "CMD ";
+     hex  = java.util.HexFormat.of().formatHex($1, $2, $2 + $5)
+IF TRUE
+DO traceln("[IOCTL] " + ts + " SPI  " + mode + " len=" + $5 + " " + hex)
+ENDRULE

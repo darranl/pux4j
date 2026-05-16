@@ -334,8 +334,14 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             configureFastRefreshMode();
 
             waitBusy();
+            
+            // Write to both RAMs to establish baseline for subsequent partial refresh
             setCursor(0, 0);
             sendCommand(CMD_WRITE_BW_RAM);
+            sendData(data);
+            
+            setCursor(0, 0);
+            sendCommand(CMD_WRITE_RED_RAM);
             sendData(data);
 
             sendCommand(CMD_DISP_UPDATE_2);

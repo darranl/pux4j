@@ -133,6 +133,17 @@ public final class DisplaySmokeTest {
             byte centerValue = overlayB1[centerRowOffset];
             log.info("Step 3 verification: center byte (row={}, byte={}, offset={}) = 0x{} (expect 0x00)",
                 CENTER_ROW, CENTER_BYTE, centerRowOffset, String.format("%02X", centerValue & 0xFF));
+            
+            // Check a few bytes around center to see the pattern
+            StringBuilder hexDump = new StringBuilder();
+            for (int i = -2; i <= 2; i++) {
+                int offset = centerRowOffset + i;
+                if (offset >= 0 && offset < overlayB1.length) {
+                    hexDump.append(String.format("%02X ", overlayB1[offset] & 0xFF));
+                }
+            }
+            log.info("Step 3 center bytes [{}-2..{}+2]: {}", CENTER_BYTE, CENTER_BYTE, hexDump);
+            
             assert centerValue == (byte)0x00 : "Center of block should be black (0x00), was: 0x" + 
                 String.format("%02X", centerValue & 0xFF);
             
