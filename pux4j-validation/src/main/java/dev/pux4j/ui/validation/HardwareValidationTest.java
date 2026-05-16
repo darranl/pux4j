@@ -195,7 +195,7 @@ public final class HardwareValidationTest {
             // Clear screen before sleep — WaveShare recommend not leaving pixels set to
             // avoid long-term burn-in from sustained pixel states.
             log.info("PHASE completion: clearing screen to all-white (FULL refresh) before sleep");
-            int clearBytes = (framebufferWidth / 8) * framebufferHeight;
+            int clearBytes = ((framebufferWidth + 7) / 8) * framebufferHeight;
             byte[] allWhite = new byte[clearBytes];
             Arrays.fill(allWhite, (byte) 0xFF);
             display.writeFrame(new MonochromeFrame(allWhite, RefreshMode.FULL)).join();
@@ -350,8 +350,8 @@ public final class HardwareValidationTest {
         String notes
     ) {
         private static Options parse(String[] args) {
-            String displayDriver = "ssd1675a";
-            String touchDriver = "icnt86x";
+            String displayDriver = null;
+            String touchDriver = null;
             Orientation orientation = Orientation.LANDSCAPE;
             int touchNativeWidth = 4096;
             int touchNativeHeight = 4096;
@@ -361,7 +361,7 @@ public final class HardwareValidationTest {
             int dcPin = 25;
             int rstPin = 17;
             int busyPin = 24;
-            int touchI2cAddress = 0x48;
+            int touchI2cAddress = -1;
             int touchRstPin = 22;
             int touchIntPin = 27;
             int scenarioCount = Integer.MAX_VALUE;
@@ -390,9 +390,21 @@ public final class HardwareValidationTest {
                     case "--scenario-count" -> scenarioCount = Integer.parseInt(requireValue(args, ++i, arg));
                     case "--all-scenarios" -> scenarioCount = Integer.MAX_VALUE;
                     case "--notes" -> notes = requireValue(args, ++i, arg);
-                    default -> throw new IllegalArgumentException("Unknown argument: " + arg);
+                    default -> {
+                        if (!arg.startsWith("-")) {
+                            if (displayDriver == null) displayDriver = arg;
+                            else if (touchDriver == null) touchDriver = arg;
+                            else throw new IllegalArgumentException("Unknown argument: " + arg);
+                        } else {
+                            throw new IllegalArgumentException("Unknown argument: " + arg);
+                        }
+                    }
                 }
             }
+
+            if (displayDriver == null) displayDriver = "ssd1675a";
+            if (touchDriver == null) touchDriver = "icnt86x";
+            if (touchI2cAddress == -1) touchI2cAddress = touchDriver.equals("gt1151q") ? 0x14 : 0x48;
 
             return new Options(
                 displayDriver,
@@ -540,7 +552,7 @@ public final class HardwareValidationTest {
             this.logicalWidth = logicalWidth;
             this.logicalHeight = logicalHeight;
             this.orientation = orientation;
-            this.framebufferRowBytes = framebufferWidth / 8;
+            this.framebufferRowBytes = (framebufferWidth + 7) / 8;
         }
 
         private int logicalWidth() {
@@ -1190,6 +1202,26 @@ public final class HardwareValidationTest {
             return out;
         }
 
+        // Progressive halving to a 512×512 ceiling before caching — prevents huge
+        // uncompressed images (e.g. 6000×7000 PNG) from exhausting heap on the Pi Zero.
+        private static BufferedImage scaleDownIcon(BufferedImage source) {
+            int maxDim = 512;
+            int w = source.getWidth();
+            int h = source.getHeight();
+            while (w > maxDim || h > maxDim) {
+                int nextW = Math.max(1, w / 2);
+                int nextH = Math.max(1, h / 2);
+                var step = new BufferedImage(nextW, nextH, BufferedImage.TYPE_INT_ARGB);
+                var sg = step.createGraphics();
+                sg.drawImage(source, 0, 0, nextW, nextH, null);
+                sg.dispose();
+                source = step;
+                w = nextW;
+                h = nextH;
+            }
+            return source;
+        }
+
         private static Optional<BufferedImage> loadIcon(String resourcePath) {
             if (PNG_CACHE.containsKey(resourcePath)) {
                 return PNG_CACHE.get(resourcePath);
@@ -1208,7 +1240,7 @@ public final class HardwareValidationTest {
             try (InputStream s = stream) {
                 Optional<BufferedImage> loaded = s == null
                     ? Optional.empty()
-                    : Optional.ofNullable(ImageIO.read(s));
+                    : Optional.ofNullable(ImageIO.read(s)).map(ValidationStepFactory::scaleDownIcon);
                 PNG_CACHE.put(resourcePath, loaded);
                 if (loaded.isEmpty()) {
                     log.warn("PNG icon not found: {} (falling back to drawn shape)", resourcePath);

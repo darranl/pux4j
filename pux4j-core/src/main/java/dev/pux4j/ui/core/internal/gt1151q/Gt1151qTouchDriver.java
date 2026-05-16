@@ -104,7 +104,11 @@ final class Gt1151qTouchDriver implements TouchDriver {
         }
 
         int touchCount = status & 0x0F;
-        if (touchCount < 1 || touchCount > MAX_TOUCH_POINTS) {
+        if (touchCount == 0) {
+            writeRegister(REG_TOUCH_STATUS, (byte) 0x00);
+            return Collections.emptyList();
+        }
+        if (touchCount > MAX_TOUCH_POINTS) {
             log.warn("GT1151Q: unexpected touch count {}, discarding", touchCount);
             writeRegister(REG_TOUCH_STATUS, (byte) 0x00);
             return Collections.emptyList();
@@ -117,10 +121,12 @@ final class Gt1151qTouchDriver implements TouchDriver {
         List<TouchPoint> points = new ArrayList<>(touchCount);
         for (int i = 0; i < touchCount; i++) {
             int base     = i * BYTES_PER_POINT;
-            int trackId  = pointData[base + 1] & 0xFF;
-            int x        = ((pointData[base + 3] & 0xFF) << 8) | (pointData[base + 2] & 0xFF);
-            int y        = ((pointData[base + 5] & 0xFF) << 8) | (pointData[base + 4] & 0xFF);
-            int size     = ((pointData[base + 7] & 0xFF) << 8) | (pointData[base + 6] & 0xFF);
+            // GT1151Q layout per point (8 bytes from 0x814F):
+            //   [0] track ID  [1] X_L  [2] X_H  [3] Y_L  [4] Y_H  [5] size_L  [6] size_H  [7] reserved
+            int trackId  = pointData[base + 0] & 0xFF;
+            int x        = ((pointData[base + 2] & 0xFF) << 8) | (pointData[base + 1] & 0xFF);
+            int y        = ((pointData[base + 4] & 0xFF) << 8) | (pointData[base + 3] & 0xFF);
+            int size     = ((pointData[base + 6] & 0xFF) << 8) | (pointData[base + 5] & 0xFF);
             points.add(new TouchPoint(trackId, x, y, true));
         }
 
