@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package dev.pux4j.ui.core.internal.gt1151q;
+package dev.pux4j.ui.driver.hat2in13v4.gt1151q;
 
 import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.TouchDriver;

@@ -1,20 +1,21 @@
-# ByteMan hardware trace rules for pux4j-core driver internals.
+# ByteMan hardware trace rules for pux4j driver internals.
 #
 # Intercepts display driver sendCommand and sendData methods to produce
 # a compact, timestamped SPI-level trace without modifying production code.
 #
-# Supports: SSD1675A, SSD1680
+# Supports: SSD1675A (hat2in9v2), SSD1680 (hat2in13v4)
 #
 # Each line is prefixed [HW-TRACE] for easy filtering:
 #   grep '\[HW-TRACE\]' <logfile>
 #
-# Usage: loaded via pux4j-smoke-test-byteman wrapper on littleraspberry.
+# Usage: loaded via pux4j-smoke-test --enable-byteman on the Pi.
 # Requires ByteMan 4.x and -javaagent byteman.jar on the JVM command line.
+# Only rules matching loaded classes will fire — unused rules are silently ignored.
 
-# ─── SSD1675A ────────────────────────────────────────────────────────────────
+# ─── SSD1675A (2.9" V2 HAT) ──────────────────────────────────────────────────
 
 RULE ssd1675a sendCommand entry
-CLASS dev.pux4j.ui.core.internal.ssd1675a.Ssd1675aDisplayDriver
+CLASS dev.pux4j.ui.driver.hat2in9v2.ssd1675a.Ssd1675aDisplayDriver
 METHOD sendCommand(byte, byte[])
 AT ENTRY
 BIND ts   = java.lang.System.currentTimeMillis();
@@ -22,11 +23,11 @@ BIND ts   = java.lang.System.currentTimeMillis();
      dlen = $2.length;
      dhex = (dlen > 0) ? java.util.HexFormat.of().formatHex($2) : "(none)"
 IF TRUE
-DO traceln("[HW-TRACE] " + ts + " CMD  0x" + hex + " (" + dev.pux4j.ui.core.internal.ssd1675a.CmdNames.name($1) + ") data[" + dlen + "]=" + dhex)
+DO traceln("[HW-TRACE] " + ts + " CMD  0x" + hex + " (" + dev.pux4j.ui.driver.hat2in9v2.ssd1675a.CmdNames.name($1) + ") data[" + dlen + "]=" + dhex)
 ENDRULE
 
 RULE ssd1675a sendData entry
-CLASS dev.pux4j.ui.core.internal.ssd1675a.Ssd1675aDisplayDriver
+CLASS dev.pux4j.ui.driver.hat2in9v2.ssd1675a.Ssd1675aDisplayDriver
 METHOD sendData(byte[], int, int)
 AT ENTRY
 BIND ts  = java.lang.System.currentTimeMillis();
@@ -35,20 +36,20 @@ IF TRUE
 DO traceln("[HW-TRACE] " + ts + " DATA len=" + $3 + " " + hex)
 ENDRULE
 
-# ─── SSD1680 ─────────────────────────────────────────────────────────────────
+# ─── SSD1680 (2.13" V4 HAT) ──────────────────────────────────────────────────
 
 RULE ssd1680 sendCommand entry
-CLASS dev.pux4j.ui.core.internal.ssd1680.Ssd1680DisplayDriver
+CLASS dev.pux4j.ui.driver.hat2in13v4.ssd1680.Ssd1680DisplayDriver
 METHOD sendCommand(byte)
 AT ENTRY
 BIND ts  = java.lang.System.currentTimeMillis();
      hex = java.util.HexFormat.of().toHexDigits($1)
 IF TRUE
-DO traceln("[HW-TRACE] " + ts + " CMD  0x" + hex + " (" + dev.pux4j.ui.core.internal.ssd1680.CmdNames.name($1) + ")")
+DO traceln("[HW-TRACE] " + ts + " CMD  0x" + hex + " (" + dev.pux4j.ui.driver.hat2in13v4.ssd1680.CmdNames.name($1) + ")")
 ENDRULE
 
 RULE ssd1680 sendData entry
-CLASS dev.pux4j.ui.core.internal.ssd1680.Ssd1680DisplayDriver
+CLASS dev.pux4j.ui.driver.hat2in13v4.ssd1680.Ssd1680DisplayDriver
 METHOD sendData(byte[])
 AT ENTRY
 BIND ts  = java.lang.System.currentTimeMillis();

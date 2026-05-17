@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package dev.pux4j.ui.core.internal.icnt86x;
+package dev.pux4j.ui.driver.hat2in9v2.icnt86x;
 
 import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.TouchDriver;

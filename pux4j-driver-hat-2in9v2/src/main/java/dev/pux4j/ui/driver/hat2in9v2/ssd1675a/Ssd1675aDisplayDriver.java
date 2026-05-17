@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package dev.pux4j.ui.core.internal.ssd1675a;
+package dev.pux4j.ui.driver.hat2in9v2.ssd1675a;
 
 import com.pi4j.io.gpio.digital.DigitalInput;
 import com.pi4j.io.gpio.digital.DigitalOutput;
@@ -641,7 +641,7 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         int pos = offset;
         while (remaining > 0) {
             int chunk = Math.min(remaining, SPI_CHUNK);
-            // Pi4J's Spi.transfer(byte[], int, int) delegates internally to
+            // Pi4J's Spi.transfer(byte[], int, byte[], int, int) delegates internally to
             // transfer(buf, off, buf, off, len) — the same array is passed as
             // both the write and read buffer. The FFM backend then copies the
             // full-duplex SPI read-back bytes (zeros from the eInk display)

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package dev.pux4j.ui.core.internal.ssd1680;
+package dev.pux4j.ui.driver.hat2in13v4.ssd1680;
 
 import com.pi4j.io.gpio.digital.DigitalInput;
 import com.pi4j.io.gpio.digital.DigitalOutput;
@@ -332,12 +332,12 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             configureFastRefreshMode();
 
             waitBusy();
-            
+
             // Write to both RAMs to establish baseline for subsequent partial refresh
             setCursor(0, 0);
             sendCommand(CMD_WRITE_BW_RAM);
             sendData(data);
-            
+
             setCursor(0, 0);
             sendCommand(CMD_WRITE_RED_RAM);
             sendData(data);
@@ -367,7 +367,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             setCursor(0, 0);
             sendCommand(CMD_WRITE_RED_RAM);
             sendData(lastFrameBytes);
-            
+
             // Write new frame to 0x24 (BW RAM)
             setCursor(0, 0);
             sendCommand(CMD_WRITE_BW_RAM);

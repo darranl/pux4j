@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package dev.pux4j.ui.core.internal.ssd1675a;
+package dev.pux4j.ui.driver.hat2in9v2.ssd1675a;
 
 import dev.pux4j.ui.core.DisplayDriverFactory;
 import dev.pux4j.ui.core.DriverConfig;

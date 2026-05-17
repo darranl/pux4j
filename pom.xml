@@ -22,6 +22,8 @@
 
     <modules>
         <module>pux4j-core</module>
+        <module>pux4j-driver-hat-2in13v4</module>
+        <module>pux4j-driver-hat-2in9v2</module>
         <module>pux4j-transform</module>
         <module>pux4j-test-support</module>
         <module>pux4j-emulator</module>
@@ -108,6 +110,16 @@
             <dependency>
                 <groupId>dev.pux4j.ui</groupId>
                 <artifactId>pux4j-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.pux4j.ui</groupId>
+                <artifactId>pux4j-driver-hat-2in13v4</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>dev.pux4j.ui</groupId>
+                <artifactId>pux4j-driver-hat-2in9v2</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

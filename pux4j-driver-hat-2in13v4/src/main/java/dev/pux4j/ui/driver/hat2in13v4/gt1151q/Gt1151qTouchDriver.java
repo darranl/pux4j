@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package dev.pux4j.ui.core.internal.gt1151q;
+package dev.pux4j.ui.driver.hat2in13v4.gt1151q;
 
 import com.pi4j.io.gpio.digital.DigitalInput;
 import com.pi4j.io.gpio.digital.DigitalOutput;
@@ -77,7 +77,7 @@ final class Gt1151qTouchDriver implements TouchDriver {
         readRegister(REG_FW_VERSION, fwVersion);
         int version = ((fwVersion[0] & 0xFF) << 8) | (fwVersion[1] & 0xFF);
 
-        log.info("GT1151Q: Product ID '{}', FW version 0x{}", 
+        log.info("GT1151Q: Product ID '{}', FW version 0x{}",
             product, String.format("%04X", version));
     }
 
@@ -126,7 +126,6 @@ final class Gt1151qTouchDriver implements TouchDriver {
             int trackId  = pointData[base + 0] & 0xFF;
             int x        = ((pointData[base + 2] & 0xFF) << 8) | (pointData[base + 1] & 0xFF);
             int y        = ((pointData[base + 4] & 0xFF) << 8) | (pointData[base + 3] & 0xFF);
-            int size     = ((pointData[base + 6] & 0xFF) << 8) | (pointData[base + 5] & 0xFF);
             points.add(new TouchPoint(trackId, x, y, true));
         }
 

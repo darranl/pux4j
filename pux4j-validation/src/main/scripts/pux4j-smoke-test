@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Run DisplaySmokeTest — launcher for @dist.name@
+set -euo pipefail
+
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SCRIPT_SOURCE" ]; do
+  SCRIPT_DIR=$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)
+  SCRIPT_SOURCE=$(readlink "$SCRIPT_SOURCE")
+  [[ $SCRIPT_SOURCE != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
+done
+SCRIPT_DIR=$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)
+
+LIB_DIR="$(cd "$SCRIPT_DIR/../lib" && pwd)"
+BYTEMAN_DIR="$(cd "$SCRIPT_DIR/../byteman" && pwd)"
+ENABLE_BYTEMAN=0
+ENABLE_IOCTL_TRACE=0
+DRIVER=""
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --enable-byteman)
+      ENABLE_BYTEMAN=1
+      shift
+      ;;
+    --enable-ioctl-trace)
+      ENABLE_IOCTL_TRACE=1
+      shift
+      ;;
+    --help|-h)
+      cat <<'HELP_EOF'
+Usage: pux4j-smoke-test [OPTIONS] [DRIVER]
+
+Arguments:
+  DRIVER                    Display driver to test (default: @dist.defaultDisplay@)
+
+Options:
+  --enable-byteman          Enable driver-level ByteMan tracing (hardware-trace.btm)
+  --enable-ioctl-trace      Enable ioctl-level ByteMan tracing (ioctl-trace.btm)
+  --help, -h                Show this help
+
+Both flags can be combined. ByteMan tracing requires BYTEMAN_HOME to be set.
+Trace log: ~/log/pux4j-smoke-test-YYYYMMDD-HHMMSS.log
+HELP_EOF
+      exit 0
+      ;;
+    -*)
+      echo "ERROR: Unknown option: $1"
+      echo "Use --help for usage information"
+      exit 1
+      ;;
+    *)
+      DRIVER="$1"
+      shift
+      ;;
+  esac
+done
+
+DEFAULT_DISPLAY="@dist.defaultDisplay@"
+DRIVER="${DRIVER:-$DEFAULT_DISPLAY}"
+
+if [[ ! -d "$LIB_DIR" ]]; then
+  echo "ERROR: Library directory not found: $LIB_DIR"
+  exit 1
+fi
+
+MODULE_PATH="$(find "$LIB_DIR" -name '*.jar' | tr '\n' ':')"
+
+JAVA_OPTS=(
+  -ea
+  --module-path "$MODULE_PATH"
+  --enable-native-access=com.pi4j.plugin.ffm
+)
+
+LOG_DIR="$HOME/log"
+LOG_FILE="/dev/null"
+
+if [[ $ENABLE_BYTEMAN -eq 1 || $ENABLE_IOCTL_TRACE -eq 1 ]]; then
+  if [[ -z "${BYTEMAN_HOME:-}" ]]; then
+    echo "ERROR: BYTEMAN_HOME not set. Run: source ~/.profile"
+    exit 1
+  fi
+
+  AGENT_JAR="$BYTEMAN_HOME/lib/byteman.jar"
+  if [[ ! -f "$AGENT_JAR" ]]; then
+    echo "ERROR: ByteMan not installed at $BYTEMAN_HOME"
+    exit 1
+  fi
+
+  mkdir -p "$LOG_DIR"
+  LOG_FILE="$LOG_DIR/pux4j-smoke-test-$(date +%Y%m%d-%H%M%S).log"
+
+  SCRIPTS=""
+  if [[ $ENABLE_BYTEMAN -eq 1 ]]; then
+    HW_RULES="$BYTEMAN_DIR/hardware-trace.btm"
+    if [[ ! -f "$HW_RULES" ]]; then
+      echo "ERROR: ByteMan rules not found: $HW_RULES"
+      exit 1
+    fi
+    SCRIPTS="script:$HW_RULES"
+    echo "Driver-level tracing enabled  [HW-TRACE]"
+    echo "  Rules: $HW_RULES"
+  fi
+  if [[ $ENABLE_IOCTL_TRACE -eq 1 ]]; then
+    IOCTL_RULES="$BYTEMAN_DIR/ioctl-trace.btm"
+    if [[ ! -f "$IOCTL_RULES" ]]; then
+      echo "ERROR: ByteMan rules not found: $IOCTL_RULES"
+      exit 1
+    fi
+    [[ -n "$SCRIPTS" ]] && SCRIPTS="$SCRIPTS,"
+    SCRIPTS="${SCRIPTS}script:$IOCTL_RULES"
+    echo "ioctl-level tracing enabled   [IOCTL]"
+    echo "  Rules: $IOCTL_RULES"
+  fi
+  echo "  Log:   $LOG_FILE"
+  echo ""
+
+  JAVA_OPTS+=(
+    -javaagent:"$AGENT_JAR=$SCRIPTS"
+    -Dorg.jboss.byteman.verbose
+  )
+fi
+
+exec java "${JAVA_OPTS[@]}" \
+  -m dev.pux4j.ui.validation/dev.pux4j.ui.validation.DisplaySmokeTest \
+  "$DRIVER" 2>&1 | tee "$LOG_FILE"
