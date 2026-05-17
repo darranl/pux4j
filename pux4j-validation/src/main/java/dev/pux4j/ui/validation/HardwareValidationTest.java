@@ -72,8 +72,6 @@ public final class HardwareValidationTest {
 
     public static void main(String[] args) {
         var options = Options.parse(args);
-        log.info("HardwareValidationTest: displayDriver={}, touchDriver={}, orientation={}",
-            options.displayDriver, options.touchDriver, options.orientation);
 
         var pi4j = Pi4J.newAutoContext();
         EInkDisplayDriver display = null;
@@ -81,9 +79,19 @@ public final class HardwareValidationTest {
         ReportWriter reportWriter = null;
 
         try {
-            var config = createDriverConfig(pi4j, options);
             var displayFactory = findFactory(DisplayDriverFactory.class, options.displayDriver, "DisplayDriverFactory");
             var touchFactory = findFactory(TouchDriverFactory.class, options.touchDriver, "TouchDriverFactory");
+
+            String resolvedDisplay = displayFactory.name();
+            String resolvedTouch = touchFactory.name();
+            int touchI2cAddress = options.touchI2cAddress >= 0
+                ? options.touchI2cAddress
+                : (resolvedTouch.equals("gt1151q") ? 0x14 : 0x48);
+
+            log.info("HardwareValidationTest: displayDriver={}, touchDriver={}, orientation={}",
+                resolvedDisplay, resolvedTouch, options.orientation);
+
+            var config = createDriverConfig(pi4j, options, touchI2cAddress);
 
             display = displayFactory.create(config);
             touch = touchFactory.create(config);
@@ -107,7 +115,7 @@ public final class HardwareValidationTest {
                 options.swapAxes
             );
 
-            reportWriter = new ReportWriter(options.displayDriver, options.notes);
+            reportWriter = new ReportWriter(resolvedDisplay, options.notes);
             var renderer = new Renderer(framebufferWidth, framebufferHeight, logicalWidth, logicalHeight, options.orientation);
             var touchPoller = new TouchPoller(touch, mapper);
 
@@ -287,13 +295,13 @@ public final class HardwareValidationTest {
         log.info("PHASE instruction-wait: tap received after prompt");
     }
 
-    private static DriverConfig createDriverConfig(Context pi4j, Options options) {
+    private static DriverConfig createDriverConfig(Context pi4j, Options options, int touchI2cAddress) {
         JsonObjectBuilder builder = Json.createObjectBuilder()
             .add("orientation", options.orientation.name())
             .add("dcPin", options.dcPin)
             .add("rstPin", options.rstPin)
             .add("busyPin", options.busyPin)
-            .add("touchI2cAddress", options.touchI2cAddress)
+            .add("touchI2cAddress", touchI2cAddress)
             .add("touchRstPin", options.touchRstPin)
             .add("touchIntPin", options.touchIntPin);
 
@@ -301,20 +309,34 @@ public final class HardwareValidationTest {
     }
 
     private static <T> T findFactory(Class<T> type, String name, String label) {
-        return ServiceLoader.load(type)
+        var all = ServiceLoader.load(type)
             .stream()
             .map(ServiceLoader.Provider::get)
-            .filter(instance -> {
-                if (instance instanceof DisplayDriverFactory displayFactory) {
-                    return displayFactory.name().equals(name);
-                }
-                if (instance instanceof TouchDriverFactory touchFactory) {
-                    return touchFactory.name().equals(name);
-                }
-                return false;
-            })
-            .findFirst()
-            .orElseThrow(() -> new IllegalStateException("No " + label + " named '" + name + "' found via ServiceLoader"));
+            .toList();
+        if (name != null) {
+            return all.stream()
+                .filter(instance -> instanceName(instance).equals(name))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                    "No " + label + " named '" + name + "' found via ServiceLoader. "
+                    + "Available: " + all.stream().map(HardwareValidationTest::instanceName).toList()));
+        }
+        // Auto-select: for DisplayDriverFactory filter out the headless "png" stub.
+        // In a native binary only one hardware driver module is compiled in.
+        var candidates = (type == DisplayDriverFactory.class)
+            ? all.stream().filter(i -> !instanceName(i).equals("png")).toList()
+            : all;
+        if (candidates.size() == 1) return candidates.get(0);
+        throw new IllegalStateException(
+            "No " + label + " name given; expected 1 provider but found " + candidates.size()
+            + ": " + candidates.stream().map(HardwareValidationTest::instanceName).toList()
+            + ". Specify with --display/--touch.");
+    }
+
+    private static String instanceName(Object instance) {
+        if (instance instanceof DisplayDriverFactory f) return f.name();
+        if (instance instanceof TouchDriverFactory f) return f.name();
+        return instance.getClass().getSimpleName();
     }
 
     private static int logicalWidth(Orientation orientation, int framebufferWidth, int framebufferHeight) {
@@ -402,9 +424,8 @@ public final class HardwareValidationTest {
                 }
             }
 
-            if (displayDriver == null) displayDriver = "ssd1675a";
-            if (touchDriver == null) touchDriver = "icnt86x";
-            if (touchI2cAddress == -1) touchI2cAddress = touchDriver.equals("gt1151q") ? 0x14 : 0x48;
+            // displayDriver and touchDriver remain null → auto-selected from ServiceLoader later
+            // touchI2cAddress remains -1 → derived from resolved touch driver name in main()
 
             return new Options(
                 displayDriver,

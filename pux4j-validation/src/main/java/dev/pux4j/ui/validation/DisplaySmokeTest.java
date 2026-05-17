@@ -48,14 +48,12 @@ public final class DisplaySmokeTest {
     private static int INNER_HALF_BYTES;
 
     public static void main(String[] args) throws Exception {
-        String driverName = args.length > 0 ? args[0] : "ssd1675a";
+        String driverName = args.length > 0 ? args[0] : null;
         banner("DisplaySmokeTest starting");
-        log.info("driver = {}", driverName);
+        var factory = findFactory(driverName);
+        log.info("driver = {}", factory.name());
         log.info("display dimensions = {}x{} native ({} bytes per frame)", WIDTH, HEIGHT, FRAME_BYTES);
         log.info("landscape view: {}px wide x {}px tall", HEIGHT, WIDTH);
-
-        var factory = findFactory(driverName);
-        log.info("found DisplayDriverFactory: {}", factory.getClass().getName());
 
         var pi4j = Pi4J.newAutoContext();
         try {
@@ -355,12 +353,25 @@ public final class DisplaySmokeTest {
     }
 
     private static DisplayDriverFactory findFactory(String name) {
-        return ServiceLoader.load(DisplayDriverFactory.class)
+        var all = ServiceLoader.load(DisplayDriverFactory.class)
             .stream()
             .map(ServiceLoader.Provider::get)
-            .filter(f -> f.name().equals(name))
-            .findFirst()
-            .orElseThrow(() -> new IllegalStateException(
-                "No DisplayDriverFactory named '" + name + "' found via ServiceLoader"));
+            .toList();
+        if (name != null) {
+            return all.stream()
+                .filter(f -> f.name().equals(name))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                    "No DisplayDriverFactory named '" + name + "' found via ServiceLoader. "
+                    + "Available: " + all.stream().map(DisplayDriverFactory::name).toList()));
+        }
+        // Auto-select: use the sole non-PNG hardware factory.
+        // In a native binary only one hardware driver module is compiled in.
+        var hardware = all.stream().filter(f -> !f.name().equals("png")).toList();
+        if (hardware.size() == 1) return hardware.get(0);
+        throw new IllegalStateException(
+            "No driver name given; expected 1 non-PNG factory but found " + hardware.size()
+            + ": " + hardware.stream().map(DisplayDriverFactory::name).toList()
+            + ". Pass the driver name as the first argument.");
     }
 }
