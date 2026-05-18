@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.StackPane?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<StackPane xmlns:fx="http://javafx.com/fxml/1"
+           fx:controller="dev.pux4j.ui.demo.DemoController"
+           stylesheets="@demo.css"
+           styleClass="eink-frame">
+    <HBox prefWidth="296" prefHeight="128" styleClass="display-area">
+        <Button fx:id="decBtn" text="&#x2212;" prefWidth="64" prefHeight="128"
+                styleClass="counter-button" onAction="#onDecrement"/>
+        <Label  fx:id="counterLabel" prefHeight="128" styleClass="counter-label">
+            <HBox.hgrow>ALWAYS</HBox.hgrow>
+        </Label>
+        <Button fx:id="incBtn" text="+" prefWidth="64" prefHeight="128"
+                styleClass="counter-button" onAction="#onIncrement"/>
+    </HBox>
+</StackPane>

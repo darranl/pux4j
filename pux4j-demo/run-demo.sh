@@ -3,10 +3,11 @@
 # Auto-prepares runtime artifacts when missing.
 #
 # Usage:
-#   ./run-demo.sh [--scale=<factor>]
+#   ./run-demo.sh [--scale=<factor>] [--no-bezel]
 #
 # Options:
 #   --scale=<n>   Display scale factor (default: 3.0). Use 1 for pixel-exact eInk size.
+#   --no-bezel    Hide the black eInk-frame border (use when running on actual eInk hardware).
 #
 # Environment:
 #   SKIP_PREPARE=1    Skip auto-build/dependency preparation checks
@@ -14,9 +15,11 @@
 set -euo pipefail
 
 SCALE=3.0
+BEZEL=true
 for arg in "$@"; do
   case "$arg" in
-    --scale=*) SCALE="${arg#--scale=}" ;;
+    --scale=*)  SCALE="${arg#--scale=}" ;;
+    --no-bezel) BEZEL=false ;;
     -h|--help)
       grep '^#' "$0" | sed 's/^# \?//'
       exit 0
@@ -64,4 +67,5 @@ exec java \
   --module-path "$MODULE_PATH" \
   --enable-native-access=javafx.graphics \
   -Dpux4j.display.scale="$SCALE" \
+  -Dpux4j.display.bezel="$BEZEL" \
   -m dev.pux4j.ui.demo/dev.pux4j.ui.demo.DemoApp

@@ -1,6 +1,11 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 
-.root {
+.eink-frame {
+    -fx-background-color: black;
+    -fx-padding: 24;
+}
+
+.display-area {
     -fx-background-color: white;
 }
 

@@ -2,75 +2,74 @@
 package dev.pux4j.ui.demo;
 
 import javafx.application.Application;
-import javafx.beans.property.SimpleIntegerProperty;
-import javafx.geometry.Pos;
+import javafx.application.Platform;
+import javafx.fxml.FXMLLoader;
 import javafx.scene.Group;
 import javafx.scene.Scene;
-import javafx.scene.control.Button;
-import javafx.scene.control.Label;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Priority;
+import javafx.scene.control.ContextMenu;
+import javafx.scene.control.MenuItem;
+import javafx.scene.layout.StackPane;
 import javafx.scene.transform.Scale;
 import javafx.stage.Stage;
+import javafx.stage.StageStyle;
 
 /**
  * Counter demo application for pux4j.
  *
  * <p>The scene is laid out in eInk native pixels (296×128, landscape 2.9" V2 display).
- * A configurable scale factor ({@code pux4j.display.scale}, default 3.0) zooms the scene
- * uniformly for desktop viewing without changing any layout or font sizes.
- *
- * <p>At scale 1.0 the window is pixel-exact for eInk rendering; at the default 3.0 it
- * appears as an 888×384 desktop window.
+ * Two system properties control the desktop presentation:
+ * <ul>
+ *   <li>{@code pux4j.display.scale} — zoom factor (default 3.0); use 1.0 for pixel-exact
+ *       eInk rendering</li>
+ *   <li>{@code pux4j.display.bezel} — show black eInk-frame border (default true); set false
+ *       when running on actual eInk hardware where the physical panel provides its own bezel</li>
+ * </ul>
  */
 public final class DemoApp extends Application {
 
     private static final int DISPLAY_WIDTH  = 296;
     private static final int DISPLAY_HEIGHT = 128;
-    private static final int BUTTON_WIDTH   = 64;
-    private static final int COUNTER_MIN    = 0;
-    private static final int COUNTER_MAX    = 10;
+    private static final int BEZEL_SIZE     = 24;
+    private static final int FRAME_WIDTH    = DISPLAY_WIDTH  + 2 * BEZEL_SIZE;
+    private static final int FRAME_HEIGHT   = DISPLAY_HEIGHT + 2 * BEZEL_SIZE;
 
     @Override
-    public void start(Stage stage) {
-        double scale = Double.parseDouble(System.getProperty("pux4j.display.scale", "3.0"));
+    public void start(Stage stage) throws Exception {
+        double scale     = Double.parseDouble(System.getProperty("pux4j.display.scale", "3.0"));
+        boolean showBezel = Boolean.parseBoolean(System.getProperty("pux4j.display.bezel", "true"));
 
-        var counter = new SimpleIntegerProperty(COUNTER_MIN);
+        var loader = new FXMLLoader(getClass().getResource("demo.fxml"));
+        StackPane fxmlRoot = loader.load();
 
-        var decBtn = new Button("−");
-        decBtn.getStyleClass().add("counter-button");
-        decBtn.setPrefSize(BUTTON_WIDTH, DISPLAY_HEIGHT);
-        decBtn.setMaxSize(BUTTON_WIDTH, DISPLAY_HEIGHT);
-        decBtn.disableProperty().bind(counter.isEqualTo(COUNTER_MIN));
-        decBtn.setOnAction(e -> counter.set(counter.get() - 1));
+        if (!showBezel) {
+            fxmlRoot.getStyleClass().remove("eink-frame");
+        }
 
-        var counterLabel = new Label();
-        counterLabel.textProperty().bind(counter.asString());
-        counterLabel.getStyleClass().add("counter-label");
-        counterLabel.setPrefHeight(DISPLAY_HEIGHT);
-        counterLabel.setMaxWidth(Double.MAX_VALUE);
-        counterLabel.setAlignment(Pos.CENTER);
-
-        var incBtn = new Button("+");
-        incBtn.getStyleClass().add("counter-button");
-        incBtn.setPrefSize(BUTTON_WIDTH, DISPLAY_HEIGHT);
-        incBtn.setMaxSize(BUTTON_WIDTH, DISPLAY_HEIGHT);
-        incBtn.disableProperty().bind(counter.isEqualTo(COUNTER_MAX));
-        incBtn.setOnAction(e -> counter.set(counter.get() + 1));
-
-        var root = new HBox(decBtn, counterLabel, incBtn);
-        root.setPrefSize(DISPLAY_WIDTH, DISPLAY_HEIGHT);
-        root.setMaxSize(DISPLAY_WIDTH, DISPLAY_HEIGHT);
-        HBox.setHgrow(counterLabel, Priority.ALWAYS);
-
-        var scaledRoot = new Group(root);
+        var scaledRoot = new Group(fxmlRoot);
         scaledRoot.getTransforms().add(new Scale(scale, scale, 0, 0));
 
-        var scene = new Scene(scaledRoot, DISPLAY_WIDTH * scale, DISPLAY_HEIGHT * scale);
-        scene.getStylesheets().add(getClass().getResource("demo.css").toExternalForm());
+        int sceneW = showBezel ? FRAME_WIDTH  : DISPLAY_WIDTH;
+        int sceneH = showBezel ? FRAME_HEIGHT : DISPLAY_HEIGHT;
+        var scene = new Scene(scaledRoot, sceneW * scale, sceneH * scale);
 
+        var exitItem = new MenuItem("Exit");
+        exitItem.setOnAction(e -> Platform.exit());
+        var contextMenu = new ContextMenu(exitItem);
+        scene.setOnContextMenuRequested(e ->
+                contextMenu.show(scene.getWindow(), e.getScreenX(), e.getScreenY()));
+
+        var drag = new double[]{0, 0};
+        scene.setOnMousePressed(e -> {
+            drag[0] = stage.getX() - e.getScreenX();
+            drag[1] = stage.getY() - e.getScreenY();
+        });
+        scene.setOnMouseDragged(e -> {
+            stage.setX(e.getScreenX() + drag[0]);
+            stage.setY(e.getScreenY() + drag[1]);
+        });
+
+        stage.initStyle(StageStyle.UNDECORATED);
         stage.setScene(scene);
-        stage.setTitle("pux4j Counter Demo");
         stage.setResizable(false);
         stage.show();
     }
