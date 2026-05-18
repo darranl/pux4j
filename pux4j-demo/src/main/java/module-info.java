@@ -6,4 +6,6 @@ module dev.pux4j.ui.demo {
     requires javafx.graphics;
     requires javafx.fxml;
     requires org.slf4j;
+
+    opens dev.pux4j.ui.demo to javafx.graphics;
 }

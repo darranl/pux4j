@@ -1,0 +1,40 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+.root {
+    -fx-background-color: white;
+}
+
+.counter-button {
+    -fx-background-color: white;
+    -fx-background-insets: 0;
+    -fx-background-radius: 0;
+    -fx-border-color: black;
+    -fx-border-width: 3;
+    -fx-border-radius: 0;
+    -fx-text-fill: black;
+    -fx-font-size: 50px;
+    -fx-font-weight: bold;
+    -fx-padding: 0;
+    -fx-effect: null;
+    -fx-cursor: hand;
+}
+
+.counter-button:hover {
+    -fx-background-color: #e8e8e8;
+}
+
+.counter-button:pressed {
+    -fx-background-color: #d0d0d0;
+}
+
+.counter-button:disabled {
+    -fx-opacity: 0.25;
+}
+
+.counter-label {
+    -fx-text-fill: black;
+    -fx-font-size: 72px;
+    -fx-font-weight: bold;
+    -fx-background-color: white;
+    -fx-alignment: center;
+}
