@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Run the pux4j counter demo application.
+# Run the pux4j dice rolling demo application.
 # Auto-prepares runtime artifacts when missing.
 #
 # Usage:
-#   ./run-demo.sh [--scale=<factor>] [--no-bezel]
+#   ./run-dice-demo.sh [--scale=<factor>] [--no-bezel]
 #
 # Options:
 #   --scale=<n>   Display scale factor (default: 3.0). Use 1 for pixel-exact eInk size.
@@ -25,7 +25,7 @@ done
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 PROJECT_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
-DEMO_JAR="$SCRIPT_DIR/target/pux4j-demo-0.1.0-SNAPSHOT.jar"
+DEMO_JAR="$SCRIPT_DIR/target/pux4j-dice-demo-0.1.0-SNAPSHOT.jar"
 LIB_DIR="$SCRIPT_DIR/target/run-lib"
 
 prepare_if_needed() {
@@ -45,12 +45,12 @@ prepare_if_needed() {
   fi
 
   if [[ $should_prepare -eq 1 ]]; then
-    echo "Preparing demo runtime artifacts..."
+    echo "Preparing dice demo runtime artifacts..."
     (
       cd "$PROJECT_ROOT"
-      mvn -pl pux4j-demo -am -DskipTests package
-      mvn -pl pux4j-demo -DincludeScope=runtime dependency:copy-dependencies \
-          -DoutputDirectory=pux4j-demo/target/run-lib
+      mvn -pl pux4j-dice-demo -am -DskipTests package
+      mvn -pl pux4j-dice-demo -DincludeScope=runtime dependency:copy-dependencies \
+          -DoutputDirectory=pux4j-dice-demo/target/run-lib
     )
   fi
 }
@@ -62,5 +62,5 @@ MODULE_PATH="$DEMO_JAR:$(ls "$LIB_DIR"/*.jar | tr '\n' ':')"
 exec java \
   --module-path "$MODULE_PATH" \
   --enable-native-access=javafx.graphics \
-  -m dev.pux4j.ui.demo/dev.pux4j.ui.demo.DemoApp \
+  -m dev.pux4j.ui.dice.demo/dev.pux4j.ui.dice.demo.DiceDemoApp \
   "$@"

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package dev.pux4j.ui.demo;
+package dev.pux4j.ui.dice.demo;
 
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -14,18 +14,15 @@ import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
 /**
- * Counter demo application for pux4j.
+ * Yahtzee-style dice rolling demo application for pux4j.
  *
- * <p>The scene is laid out in eInk native pixels (296×128, landscape 2.9" V2 display).
- * Two system properties control the desktop presentation:
+ * <p>Uses the same display architecture as the counter demo:
  * <ul>
- *   <li>{@code pux4j.display.scale} — zoom factor (default 3.0); use 1.0 for pixel-exact
- *       eInk rendering</li>
- *   <li>{@code pux4j.display.bezel} — show black eInk-frame border (default true); set false
- *       when running on actual eInk hardware where the physical panel provides its own bezel</li>
+ *   <li>{@code pux4j.display.scale} — zoom factor (default 3.0)</li>
+ *   <li>{@code pux4j.display.bezel} — black eInk-frame border (default true)</li>
  * </ul>
  */
-public final class DemoApp extends Application {
+public final class DiceDemoApp extends Application {
 
     private static final int DISPLAY_WIDTH  = 296;
     private static final int DISPLAY_HEIGHT = 128;
@@ -47,7 +44,7 @@ public final class DemoApp extends Application {
             }
         }
 
-        var loader = new FXMLLoader(getClass().getResource("demo.fxml"));
+        var loader = new FXMLLoader(getClass().getResource("dice-demo.fxml"));
         StackPane fxmlRoot = loader.load();
 
         if (!showBezel) {
@@ -59,7 +56,7 @@ public final class DemoApp extends Application {
 
         int sceneW = showBezel ? FRAME_WIDTH  : DISPLAY_WIDTH;
         int sceneH = showBezel ? FRAME_HEIGHT : DISPLAY_HEIGHT;
-        var scene = new Scene(scaledRoot, sceneW * scale, sceneH * scale);
+        var scene  = new Scene(scaledRoot, sceneW * scale, sceneH * scale);
 
         var exitItem = new MenuItem("Exit");
         exitItem.setOnAction(e -> Platform.exit());
@@ -84,6 +81,6 @@ public final class DemoApp extends Application {
     }
 
     public static void main(String[] args) {
-        Application.launch(DemoApp.class, args);
+        Application.launch(DiceDemoApp.class, args);
     }
 }

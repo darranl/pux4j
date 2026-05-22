@@ -1,0 +1,54 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+.eink-frame {
+    -fx-background-color: black;
+    -fx-padding: 24;
+}
+
+.display-area {
+    -fx-background-color: white;
+}
+
+.button-row {
+    -fx-background-color: white;
+    -fx-border-color: black;
+    -fx-border-width: 2 0 0 0;
+}
+
+.action-button {
+    -fx-background-color: white;
+    -fx-background-insets: 0;
+    -fx-background-radius: 0;
+    -fx-border-color: transparent;
+    -fx-border-width: 0;
+    -fx-border-radius: 0;
+    -fx-text-fill: black;
+    -fx-font-size: 14px;
+    -fx-font-weight: bold;
+    -fx-padding: 0;
+    -fx-effect: null;
+    -fx-cursor: hand;
+    -fx-pref-height: 32;
+}
+
+/* Vertical separator: right border on the left button only */
+.action-button-left {
+    -fx-border-color: black;
+    -fx-border-width: 0 1 0 0;
+}
+
+.action-button:hover {
+    -fx-background-color: #e8e8e8;
+}
+
+.action-button:pressed {
+    -fx-background-color: #d0d0d0;
+}
+
+.action-button:disabled {
+    -fx-opacity: 0.25;
+}
+
+.die-view {
+    -fx-cursor: hand;
+}

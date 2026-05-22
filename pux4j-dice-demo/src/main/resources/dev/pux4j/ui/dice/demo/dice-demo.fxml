@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<StackPane xmlns:fx="http://javafx.com/fxml/1"
+           fx:controller="dev.pux4j.ui.dice.demo.DiceController"
+           stylesheets="@dice-demo.css"
+           styleClass="eink-frame">
+    <VBox prefWidth="296" prefHeight="128" styleClass="display-area">
+        <HBox fx:id="diceBox" VBox.vgrow="ALWAYS"/>
+        <HBox prefHeight="32" styleClass="button-row">
+            <Button fx:id="clearBtn" text="Clear"
+                    HBox.hgrow="ALWAYS" maxWidth="Infinity"
+                    styleClass="action-button action-button-left" onAction="#onClear"/>
+            <Button fx:id="rollBtn" text="Roll 1"
+                    HBox.hgrow="ALWAYS" maxWidth="Infinity"
+                    styleClass="action-button" onAction="#onRoll"/>
+        </HBox>
+    </VBox>
+</StackPane>

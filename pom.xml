@@ -30,6 +30,7 @@
         <module>pux4j-fx</module>
         <module>pux4j-validation</module>
         <module>pux4j-demo</module>
+        <module>pux4j-dice-demo</module>
     </modules>
 
     <properties>
