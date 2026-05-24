@@ -134,6 +134,5 @@ fi
 exec java -Xmx192m "${JAVA_OPTS[@]}" \
   -m dev.pux4j.ui.validation/dev.pux4j.ui.validation.HardwareValidationTest \
   "$DISPLAY_DRIVER" "$TOUCH_DRIVER" \
-  --orientation LANDSCAPE_INVERTED \
-  --swap-axes --flip-x \
-  --touch-native-width 250 --touch-native-height 122 2>&1 | tee "$LOG_FILE"
+  --orientation @dist.orientation@ \
+  @dist.touchArgs@ 2>&1 | tee "$LOG_FILE"

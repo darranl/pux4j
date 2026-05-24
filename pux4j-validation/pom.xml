@@ -59,6 +59,8 @@
                 <dist.name>pux4j-validation-hat-2in13v4</dist.name>
                 <dist.defaultDisplay>ssd1680</dist.defaultDisplay>
                 <dist.defaultTouch>gt1151q</dist.defaultTouch>
+                <dist.orientation>LANDSCAPE_INVERTED</dist.orientation>
+                <dist.touchArgs>--swap-axes --flip-x --touch-native-width 250 --touch-native-height 122</dist.touchArgs>
             </properties>
             <dependencies>
                 <dependency>
@@ -102,6 +104,8 @@
                 <dist.name>pux4j-validation-hat-2in9v2</dist.name>
                 <dist.defaultDisplay>ssd1675a</dist.defaultDisplay>
                 <dist.defaultTouch>icnt86x</dist.defaultTouch>
+                <dist.orientation>LANDSCAPE</dist.orientation>
+                <dist.touchArgs>--flip-x --flip-y --touch-native-width 296 --touch-native-height 128</dist.touchArgs>
             </properties>
             <dependencies>
                 <dependency>
