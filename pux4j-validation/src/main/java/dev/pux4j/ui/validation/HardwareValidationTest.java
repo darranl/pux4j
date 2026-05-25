@@ -17,17 +17,8 @@ import jakarta.json.Json;
 import jakarta.json.JsonObjectBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import javax.imageio.ImageIO;
-
-import java.awt.BasicStroke;
-import java.awt.Color;
-import java.awt.Font;
-import java.awt.FontMetrics;
-import java.awt.Graphics2D;
-import java.awt.Polygon;
 import java.awt.Rectangle;
-import java.awt.RenderingHints;
-import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -47,6 +38,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.ServiceLoader;
 import java.util.concurrent.CompletableFuture;
+import java.util.zip.DataFormatException;
+import java.util.zip.Inflater;
 
 /**
  * Interactive 10-step hardware acceptance test.
@@ -151,7 +144,6 @@ public final class HardwareValidationTest {
                 TouchPoller.sleep(DISPLAY_SETTLE_AFTER_REFRESH);
                 touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
                 touchPoller.waitForIdle(TOUCH_ARM_TIMEOUT, TOUCH_ARM_STABLE_PERIOD);
-                displayDone.join();
                 log.info("PHASE step={} challenge: armed and waiting for answer tap", stepNumber);
 
                 var challengeStart = Instant.now();
@@ -167,6 +159,7 @@ public final class HardwareValidationTest {
                     touchPoint.y(),
                     match.map(item -> item.name).orElse("none"));
 
+                displayDone.join(); // ensure display refresh completes before feedback SPI commands
                 showFeedbackPhase(display, renderer, challengeImage, step, pass);
 
                 var expected = step.expectedRegion();
@@ -259,7 +252,7 @@ public final class HardwareValidationTest {
 
     private static void showFeedbackPhase(EInkDisplayDriver display,
                                           Renderer renderer,
-                                          BufferedImage challengeImage,
+                                          Canvas challengeImage,
                                           ValidationStep validationStep,
                                           boolean pass) {
         log.info("PHASE feedback: rendering {} overlay", pass ? "PASS" : "FAIL");
@@ -272,7 +265,7 @@ public final class HardwareValidationTest {
     private static void waitForTapWithPrompt(EInkDisplayDriver display,
                                              Renderer renderer,
                                              TouchPoller touchPoller,
-                                             BufferedImage currentImage,
+                                             Canvas currentImage,
                                              Duration initialTimeout,
                                              String prompt) {
         touchPoller.waitForRelease(TOUCH_RELEASE_TIMEOUT, TOUCH_RELEASE_STABLE_PERIOD);
@@ -553,15 +546,12 @@ public final class HardwareValidationTest {
     }
 
     private static final class Renderer {
-        private static final Color WHITE = new Color(255, 255, 255);
-        private static final Color BLACK = new Color(0, 0, 0);
 
         private final int framebufferWidth;
         private final int framebufferHeight;
         private final int logicalWidth;
         private final int logicalHeight;
         private final Orientation orientation;
-        private final int framebufferRowBytes;
 
         private Renderer(int framebufferWidth,
                          int framebufferHeight,
@@ -573,7 +563,6 @@ public final class HardwareValidationTest {
             this.logicalWidth = logicalWidth;
             this.logicalHeight = logicalHeight;
             this.orientation = orientation;
-            this.framebufferRowBytes = (framebufferWidth + 7) / 8;
         }
 
         private int logicalWidth() {
@@ -584,389 +573,242 @@ public final class HardwareValidationTest {
             return logicalHeight;
         }
 
-        private BufferedImage renderInstruction(int step, int total, String instruction, int passed, int failed) {
-            var image = blankCanvas();
-            var g = graphics(image);
-            try {
-                drawHeader(g, "Step " + step + " / " + total, "Instruction", passed, failed);
-                drawWrappedCentered(g, instruction, logicalHeight / 2 - 10, 20, true);
-                // Bottom strip left blank so the partial-refresh prompt has a clean
-                // white baseline — avoids bidirectional pixel transitions in the LUT.
-            } finally {
-                g.dispose();
-            }
-            return image;
+        private Canvas blankCanvas() {
+            return new Canvas(logicalWidth, logicalHeight, framebufferWidth, framebufferHeight, orientation);
         }
 
-        private BufferedImage renderChallenge(int step,
-                                              int total,
-                                              String instruction,
-                                              List<ChallengeItem> items,
-                                              int passed,
-                                              int failed) {
-            var image = blankCanvas();
-            var g = graphics(image);
-            try {
-                drawHeader(g, "Step " + step + " / " + total, instruction, passed, failed);
-                for (var item : items) {
-                    item.renderer.render(g, item.bounds);
-                }
-            } finally {
-                g.dispose();
-            }
-            return image;
+        private Canvas renderInstruction(int step, int total, String instruction, int passed, int failed) {
+            var canvas = blankCanvas();
+            drawHeader(canvas, "Step " + step + " / " + total, "Instruction", passed, failed);
+            drawWrappedCentered(canvas, instruction, logicalHeight / 2 - 10, 20, Canvas.SCALE_NORMAL);
+            return canvas;
         }
 
-        private List<Rectangle> drawChallengeFeedbackOverlay(BufferedImage challengeImage,
-                                                             Rectangle correctBounds,
-                                                             boolean pass) {
-            var g = graphics(challengeImage);
-            try {
-                g.setStroke(new BasicStroke(2f));
-                int centerX = correctBounds.x + (correctBounds.width / 2);
-                int topReserved = 34;
-                int bottomReserved = 6;
-                int availableAbove = Math.max(0, correctBounds.y - topReserved);
-                int availableBelow = Math.max(0, (logicalHeight - bottomReserved) - (correctBounds.y + correctBounds.height));
-                boolean placeArrowBelow = availableBelow >= availableAbove;
-
-                int arrowTipY;
-                int arrowHeadTopY;
-                int arrowStartY;
-                if (placeArrowBelow) {
-                    arrowTipY = Math.min(logicalHeight - 8, correctBounds.y + correctBounds.height + 2);
-                    int arrowHeadBottomY = Math.min(logicalHeight - 6, arrowTipY + 12);
-                    arrowHeadTopY = arrowTipY;
-                    arrowStartY = Math.min(logicalHeight - 6, arrowHeadBottomY + 16);
-                } else {
-                    arrowTipY = Math.max(topReserved, correctBounds.y - 2);
-                    arrowHeadTopY = Math.max(topReserved - 6, arrowTipY - 12);
-                    arrowStartY = Math.max(18, arrowHeadTopY - 16);
-                }
-                int arrowHalf = 7;
-
-                var arrowHead = placeArrowBelow
-                    ? new Polygon(
-                        new int[]{centerX - arrowHalf, centerX + arrowHalf, centerX},
-                        new int[]{arrowTipY + 12, arrowTipY + 12, arrowTipY},
-                        3
-                    )
-                    : new Polygon(
-                        new int[]{centerX - arrowHalf, centerX + arrowHalf, centerX},
-                        new int[]{arrowHeadTopY, arrowHeadTopY, arrowTipY},
-                        3
-                    );
-                g.setColor(BLACK);
-                g.fillPolygon(arrowHead);
-                if (placeArrowBelow) {
-                    g.drawLine(centerX, arrowStartY, centerX, arrowTipY + 12);
-                } else {
-                    g.drawLine(centerX, arrowStartY, centerX, arrowHeadTopY);
-                }
-
-                int ringPad = 4;
-                Rectangle ringRect = clampRect(new Rectangle(
-                    correctBounds.x - ringPad,
-                    correctBounds.y - ringPad,
-                    correctBounds.width + ringPad * 2,
-                    correctBounds.height + ringPad * 2
-                ));
-                g.drawRect(ringRect.x, ringRect.y, ringRect.width - 1, ringRect.height - 1);
-
-                var overlays = new ArrayList<Rectangle>(1);
-                int markerX = Math.max(0, ringRect.x - 10);
-                int markerY = Math.max(0, Math.min(arrowStartY, ringRect.y) - 2);
-                int markerW = Math.min(logicalWidth - markerX, ringRect.width + 20);
-                int markerBottom = Math.max(ringRect.y + ringRect.height + 2, placeArrowBelow ? arrowStartY + 2 : arrowTipY + 2);
-                int markerH = Math.min(logicalHeight - markerY, markerBottom - markerY);
-                overlays.add(clampRect(new Rectangle(markerX, markerY, markerW, markerH)));
-                return overlays;
-            } finally {
-                g.dispose();
+        private Canvas renderChallenge(int step,
+                                       int total,
+                                       String instruction,
+                                       List<ChallengeItem> items,
+                                       int passed,
+                                       int failed) {
+            var canvas = blankCanvas();
+            drawHeader(canvas, "Step " + step + " / " + total, instruction, passed, failed);
+            for (var item : items) {
+                item.renderer.render(canvas, item.bounds);
             }
+            return canvas;
         }
 
-        private BufferedImage renderCompletionScreen(int passed, int failed, Path reportPath) {
-            Optional<BufferedImage> poster = loadResourceImage("icons/Pux.png");
+        private void drawChallengeFeedbackOverlay(Canvas canvas, Rectangle correctBounds, boolean pass) {
+            int centerX = correctBounds.x + (correctBounds.width / 2);
+            int topReserved = 34;
+            int bottomReserved = 6;
+            int availableAbove = Math.max(0, correctBounds.y - topReserved);
+            int availableBelow = Math.max(0, (logicalHeight - bottomReserved) - (correctBounds.y + correctBounds.height));
+            boolean placeArrowBelow = availableBelow >= availableAbove;
+
+            int arrowTipY;
+            int arrowHeadTopY;
+            int arrowStartY;
+            if (placeArrowBelow) {
+                arrowTipY = Math.min(logicalHeight - 8, correctBounds.y + correctBounds.height + 2);
+                int arrowHeadBottomY = Math.min(logicalHeight - 6, arrowTipY + 12);
+                arrowHeadTopY = arrowTipY;
+                arrowStartY = Math.min(logicalHeight - 6, arrowHeadBottomY + 16);
+            } else {
+                arrowTipY = Math.max(topReserved, correctBounds.y - 2);
+                arrowHeadTopY = Math.max(topReserved - 6, arrowTipY - 12);
+                arrowStartY = Math.max(18, arrowHeadTopY - 16);
+            }
+            int arrowHalf = 7;
+
+            canvas.setBlack();
+            if (placeArrowBelow) {
+                canvas.fillPolygon(
+                    new int[]{centerX - arrowHalf, centerX + arrowHalf, centerX},
+                    new int[]{arrowTipY + 12, arrowTipY + 12, arrowTipY},
+                    3);
+                canvas.drawLine(centerX, arrowStartY, centerX, arrowTipY + 12);
+            } else {
+                canvas.fillPolygon(
+                    new int[]{centerX - arrowHalf, centerX + arrowHalf, centerX},
+                    new int[]{arrowHeadTopY, arrowHeadTopY, arrowTipY},
+                    3);
+                canvas.drawLine(centerX, arrowStartY, centerX, arrowHeadTopY);
+            }
+
+            int ringPad = 4;
+            Rectangle ringRect = clampRect(new Rectangle(
+                correctBounds.x - ringPad,
+                correctBounds.y - ringPad,
+                correctBounds.width + ringPad * 2,
+                correctBounds.height + ringPad * 2
+            ));
+            canvas.drawRect(ringRect.x, ringRect.y, ringRect.width - 1, ringRect.height - 1);
+        }
+
+        private Canvas renderCompletionScreen(int passed, int failed, Path reportPath) {
+            Optional<PngReader.PngImage> poster = loadResourceImage("icons/Pux.png");
             if (poster.isEmpty()) {
                 return renderFallbackCompletion(passed, failed, reportPath);
             }
 
-            var image = blankCanvas();
-            var g = graphics(image);
-            try {
-                drawHeader(g, "Validation Complete", "Pux", passed, failed);
-                drawCenteredText(g, "COMPLETE", 44, true);
-                BufferedImage src = poster.get();
+            var canvas = blankCanvas();
+            drawHeader(canvas, "Validation Complete", "Pux", passed, failed);
+            drawCenteredText(canvas, "COMPLETE", 44, Canvas.SCALE_NORMAL);
+            PngReader.PngImage src = poster.get();
 
-                int availableTop = 50;
-                int availableBottom = logicalHeight - 28;
-                int availableHeight = Math.max(20, availableBottom - availableTop);
-                int availableWidth = logicalWidth - 8;
+            int availableTop = 50;
+            int availableBottom = logicalHeight - 28;
+            int availableHeight = Math.max(20, availableBottom - availableTop);
+            int availableWidth = logicalWidth - 8;
 
-                double scale = Math.min((double) availableWidth / src.getWidth(), (double) availableHeight / src.getHeight());
-                scale = Math.min(scale, 1.0);
+            double scale = Math.min((double) availableWidth / src.width(), (double) availableHeight / src.height());
+            scale = Math.min(scale, 1.0);
 
-                int drawW = Math.max(1, (int) Math.round(src.getWidth() * scale));
-                int drawH = Math.max(1, (int) Math.round(src.getHeight() * scale));
-                int drawX = (logicalWidth - drawW) / 2;
-                int drawY = availableTop + ((availableHeight - drawH) / 2);
+            int drawW = Math.max(1, (int) Math.round(src.width() * scale));
+            int drawH = Math.max(1, (int) Math.round(src.height() * scale));
+            int drawX = (logicalWidth - drawW) / 2;
+            int drawY = availableTop + ((availableHeight - drawH) / 2);
 
-                BufferedImage mono = toHighContrastMonochrome(src, drawW, drawH);
-                g.drawImage(mono, drawX, drawY, drawW, drawH, null);
-                g.setColor(BLACK);
-                g.drawRect(drawX, drawY, Math.max(0, drawW - 1), Math.max(0, drawH - 1));
+            int[] mono = PngReader.toHighContrastMonochrome(src, drawW, drawH);
+            canvas.drawImage(mono, drawW, drawH, drawX, drawY);
+            canvas.setBlack();
+            canvas.drawRect(drawX, drawY, Math.max(0, drawW - 1), Math.max(0, drawH - 1));
 
-                drawCenteredText(g, "Passed: " + passed + "   Failed: " + failed, logicalHeight - 12, true);
-            } finally {
-                g.dispose();
-            }
-            return image;
+            drawCenteredText(canvas, "Passed: " + passed + "   Failed: " + failed,
+                logicalHeight - 12, Canvas.SCALE_SMALL);
+            return canvas;
         }
 
-        private BufferedImage renderFallbackCompletion(int passed, int failed, Path reportPath) {
-            var image = blankCanvas();
-            var g = graphics(image);
-            try {
-                drawHeader(g, "Validation Complete", "Summary", passed, failed);
-                drawCenteredText(g, "Passed: " + passed, logicalHeight / 2 - 10, true);
-                drawCenteredText(g, "Failed: " + failed, logicalHeight / 2 + 10, true);
-                drawWrappedCentered(g, "Report: " + reportPath.getFileName(), logicalHeight - 14, 16, false);
-            } finally {
-                g.dispose();
-            }
-            return image;
+        private Canvas renderFallbackCompletion(int passed, int failed, Path reportPath) {
+            var canvas = blankCanvas();
+            drawHeader(canvas, "Validation Complete", "Summary", passed, failed);
+            drawCenteredText(canvas, "Passed: " + passed, logicalHeight / 2 - 10, Canvas.SCALE_NORMAL);
+            drawCenteredText(canvas, "Failed: " + failed, logicalHeight / 2 + 10, Canvas.SCALE_NORMAL);
+            drawWrappedCentered(canvas, "Report: " + reportPath.getFileName(),
+                logicalHeight - 14, 14, Canvas.SCALE_SMALL);
+            return canvas;
         }
 
-        private BufferedImage toHighContrastMonochrome(BufferedImage source, int width, int height) {
-            var scaled = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-            var gs = scaled.createGraphics();
-            gs.setColor(WHITE);
-            gs.fillRect(0, 0, width, height);
-            gs.drawImage(source, 0, 0, width, height, null);
-            gs.dispose();
-
-            var out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-            for (int y = 0; y < height; y++) {
-                for (int x = 0; x < width; x++) {
-                    int argb = scaled.getRGB(x, y);
-                    int a = (argb >>> 24) & 0xFF;
-                    int r = (argb >>> 16) & 0xFF;
-                    int g = (argb >>> 8) & 0xFF;
-                    int b = argb & 0xFF;
-                    int luminance = (r * 299 + g * 587 + b * 114) / 1000;
-                    boolean dark = a > 20 && luminance < 190;
-                    out.setRGB(x, y, dark ? BLACK.getRGB() : WHITE.getRGB());
-                }
-            }
-            return out;
-        }
-
-        private Optional<BufferedImage> loadResourceImage(String resourcePath) {
+        private Optional<PngReader.PngImage> loadResourceImage(String resourcePath) {
             var candidates = List.of(
                 resourcePath,
                 "/" + resourcePath,
                 "icons/" + Path.of(resourcePath).getFileName(),
                 "/icons/" + Path.of(resourcePath).getFileName()
             );
-
             for (var candidate : candidates) {
                 try (InputStream stream = openResource(candidate)) {
-                    if (stream == null) {
-                        continue;
-                    }
-                    var image = ImageIO.read(stream);
-                    if (image != null) {
-                        return Optional.of(image);
-                    }
+                    if (stream == null) continue;
+                    var image = PngReader.read(stream);
+                    if (image.isPresent()) return image;
                 } catch (IOException e) {
                     log.warn("Unable to load resource image {}", candidate, e);
                 }
             }
-
             log.debug("Resource image not found: {}", resourcePath);
             return Optional.empty();
         }
 
         private InputStream openResource(String resourcePath) {
             InputStream stream = HardwareValidationTest.class.getResourceAsStream(resourcePath);
-            if (stream != null) {
-                return stream;
-            }
+            if (stream != null) return stream;
             String stripped = resourcePath.startsWith("/") ? resourcePath.substring(1) : resourcePath;
             return HardwareValidationTest.class.getClassLoader().getResourceAsStream(stripped);
         }
 
-        private void drawPrompt(BufferedImage image, int y, int height, String prompt) {
-            var g = graphics(image);
-            try {
-                g.setColor(WHITE);
-                g.fillRect(0, y, logicalWidth, height);
-                g.setColor(BLACK);
-                g.drawLine(0, y, logicalWidth - 1, y);
-                drawCenteredText(g, prompt, y + (height / 2) + 4, false);
-            } finally {
-                g.dispose();
-            }
+        private void drawPrompt(Canvas canvas, int y, int height, String prompt) {
+            canvas.setWhite();
+            canvas.fillRect(0, y, logicalWidth, height);
+            canvas.setBlack();
+            canvas.drawLine(0, y, logicalWidth - 1, y);
+            drawCenteredText(canvas, prompt, y + (height / 2) + 4, Canvas.SCALE_SMALL);
         }
 
-        private void writeFull(EInkDisplayDriver display, BufferedImage image) {
-            writeFullAsync(display, image).join();
+        private void writeFull(EInkDisplayDriver display, Canvas canvas) {
+            writeFullAsync(display, canvas).join();
         }
 
-        private CompletableFuture<Void> writeFullAsync(EInkDisplayDriver display, BufferedImage image) {
-            byte[] packed = packMonochrome(image);
-            return display.writeFrame(new MonochromeFrame(packed, RefreshMode.FULL));
+        private CompletableFuture<Void> writeFullAsync(EInkDisplayDriver display, Canvas canvas) {
+            return display.writeFrame(new MonochromeFrame(canvas.packMonochrome(), RefreshMode.FULL));
         }
 
-        private void writeFast(EInkDisplayDriver display, BufferedImage image) {
-            writeFastAsync(display, image).join();
+        private void writeFast(EInkDisplayDriver display, Canvas canvas) {
+            writeFastAsync(display, canvas).join();
         }
 
-        private CompletableFuture<Void> writeFastAsync(EInkDisplayDriver display, BufferedImage image) {
-            byte[] packed = packMonochrome(image);
-            return display.writeFrame(new MonochromeFrame(packed, RefreshMode.FAST));
+        private CompletableFuture<Void> writeFastAsync(EInkDisplayDriver display, Canvas canvas) {
+            return display.writeFrame(new MonochromeFrame(canvas.packMonochrome(), RefreshMode.FAST));
         }
 
         // Writes the full packed frame using the partial waveform. Only pixels that
         // changed from the previous full frame will visibly update on the display.
         // The SSD1675A reference implementation always writes the complete framebuffer
         // for partial updates (it never sub-region-writes to 0x24); we follow that.
-        private void writePartial(EInkDisplayDriver display, BufferedImage image) {
-            byte[] packed = packMonochrome(image);
-            display.writeFrame(new MonochromeFrame(packed, RefreshMode.PARTIAL)).join();
+        private void writePartial(EInkDisplayDriver display, Canvas canvas) {
+            display.writeFrame(new MonochromeFrame(canvas.packMonochrome(), RefreshMode.PARTIAL)).join();
         }
 
-
-
-        private byte[] packMonochrome(BufferedImage image) {
-            byte[] out = new byte[framebufferRowBytes * framebufferHeight];
-            Arrays.fill(out, (byte) 0xFF);
-
-            for (int y = 0; y < logicalHeight; y++) {
-                for (int x = 0; x < logicalWidth; x++) {
-                    int rgb = image.getRGB(x, y);
-                    int r = (rgb >> 16) & 0xFF;
-                    int g = (rgb >> 8) & 0xFF;
-                    int b = rgb & 0xFF;
-                    int luminance = (r * 299 + g * 587 + b * 114) / 1000;
-                    if (luminance < 128) {
-                        int[] mapped = mapLogicalToFramebuffer(x, y);
-                        int fx = mapped[0];
-                        int fy = mapped[1];
-                        int idx = fy * framebufferRowBytes + (fx / 8);
-                        int bit = 7 - (fx % 8);
-                        out[idx] = (byte) (out[idx] & ~(1 << bit));
-                    }
-                }
-            }
-            return out;
+        private void drawHeader(Canvas canvas, String title, String subtitle, int passed, int failed) {
+            canvas.setBlack();
+            canvas.drawLine(0, 26, logicalWidth - 1, 26);
+            drawCenteredText(canvas, title, 14, Canvas.SCALE_SMALL);
+            drawCenteredText(canvas, subtitle, 24, Canvas.SCALE_SMALL);
+            drawScoreBadge(canvas, passed, failed);
         }
 
-        private int[] mapLogicalToFramebuffer(int logicalX, int logicalY) {
-            return switch (orientation) {
-                case PORTRAIT -> new int[]{logicalX, logicalY};
-                case LANDSCAPE -> new int[]{logicalY, framebufferHeight - 1 - logicalX};
-                case PORTRAIT_INVERTED -> new int[]{framebufferWidth - 1 - logicalX, framebufferHeight - 1 - logicalY};
-                case LANDSCAPE_INVERTED -> new int[]{framebufferWidth - 1 - logicalY, logicalX};
-            };
-        }
-
-        private BufferedImage blankCanvas() {
-            var image = new BufferedImage(logicalWidth, logicalHeight, BufferedImage.TYPE_INT_RGB);
-            var g = image.createGraphics();
-            g.setColor(WHITE);
-            g.fillRect(0, 0, logicalWidth, logicalHeight);
-            g.dispose();
-            return image;
-        }
-
-        private Graphics2D graphics(BufferedImage image) {
-            var g = image.createGraphics();
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_OFF);
-            g.setStroke(new BasicStroke(2f));
-            g.setColor(BLACK);
-            g.setFont(new Font("SansSerif", Font.BOLD, Math.max(12, logicalHeight / 12)));
-            return g;
-        }
-
-        private void drawHeader(Graphics2D g, String title, String subtitle, int passed, int failed) {
-            g.setColor(BLACK);
-            g.drawLine(0, 26, logicalWidth - 1, 26);
-            drawCenteredText(g, title, 14, true);
-            g.setFont(new Font("SansSerif", Font.PLAIN, Math.max(10, logicalHeight / 16)));
-            drawCenteredText(g, subtitle, 24, false);
-            drawScoreBadge(g, passed, failed);
-            g.setFont(new Font("SansSerif", Font.BOLD, Math.max(12, logicalHeight / 12)));
-        }
-
-        private void drawScoreBadge(Graphics2D g, int passed, int failed) {
+        private void drawScoreBadge(Canvas canvas, int passed, int failed) {
             String text = "P:" + passed + "  F:" + failed;
-            Font badgeFont = new Font("SansSerif", Font.BOLD, Math.max(10, logicalHeight / 17));
-            g.setFont(badgeFont);
-            FontMetrics fm = g.getFontMetrics();
+            int scale = Canvas.SCALE_SMALL;
+            int sw = Canvas.stringWidth(text, scale);
             int padX = 5;
             int padY = 2;
             int badgeX = 6;
             int badgeY = 3;
-            int badgeW = fm.stringWidth(text) + (padX * 2);
-            int badgeH = fm.getHeight() + (padY * 2);
+            int badgeW = sw + padX * 2;
+            int badgeH = Canvas.FONT_H * scale + padY * 2;
 
-            g.setColor(WHITE);
-            g.fillRect(badgeX, badgeY, badgeW, badgeH);
-            g.setColor(BLACK);
-            g.drawRect(badgeX, badgeY, badgeW, badgeH);
-            int textX = badgeX + padX;
-            int textY = badgeY + padY + fm.getAscent();
-            g.drawString(text, textX, textY);
+            canvas.setWhite();
+            canvas.fillRect(badgeX, badgeY, badgeW, badgeH);
+            canvas.setBlack();
+            canvas.drawRect(badgeX, badgeY, badgeW, badgeH);
+            canvas.drawString(text, badgeX + padX, badgeY + padY, scale);
         }
 
-        private void drawWrappedCentered(Graphics2D g, String text, int y, int lineHeight, boolean bold) {
-            Font font = new Font("SansSerif", bold ? Font.BOLD : Font.PLAIN, Math.max(11, logicalHeight / 14));
-            g.setFont(font);
-            FontMetrics fm = g.getFontMetrics();
-
+        private void drawWrappedCentered(Canvas canvas, String text, int centerY, int lineHeight, int scale) {
             int maxWidth = logicalWidth - 12;
-            var lines = wrap(text, fm, maxWidth);
-            int baseY = y - ((lines.size() - 1) * lineHeight / 2);
+            var lines = wrap(text, maxWidth, scale);
+            int baseY = centerY - ((lines.size() - 1) * lineHeight / 2);
             for (int i = 0; i < lines.size(); i++) {
-                drawCenteredText(g, lines.get(i), baseY + i * lineHeight, false);
+                drawCenteredText(canvas, lines.get(i), baseY + i * lineHeight, scale);
             }
         }
 
-        private List<String> wrap(String text, FontMetrics fm, int maxWidth) {
+        private List<String> wrap(String text, int maxWidth, int scale) {
             String[] words = text.split("\\s+");
             var lines = new ArrayList<String>();
-            StringBuilder current = new StringBuilder();
+            var current = new StringBuilder();
             for (String word : words) {
                 String candidate = current.isEmpty() ? word : current + " " + word;
-                if (fm.stringWidth(candidate) <= maxWidth) {
+                if (Canvas.stringWidth(candidate, scale) <= maxWidth) {
                     current.setLength(0);
                     current.append(candidate);
                 } else {
-                    if (!current.isEmpty()) {
-                        lines.add(current.toString());
-                    }
+                    if (!current.isEmpty()) lines.add(current.toString());
                     current.setLength(0);
                     current.append(word);
                 }
             }
-            if (!current.isEmpty()) {
-                lines.add(current.toString());
-            }
+            if (!current.isEmpty()) lines.add(current.toString());
             return lines;
         }
 
-        private void drawCenteredText(Graphics2D g, String text, int baselineY, boolean bold) {
-            if (bold) {
-                Font f = g.getFont();
-                g.setFont(f.deriveFont(Font.BOLD));
-            }
-            FontMetrics fm = g.getFontMetrics();
-            int x = (logicalWidth - fm.stringWidth(text)) / 2;
-            g.setColor(BLACK);
-            g.drawString(text, x, baselineY);
+        // baselineY is where the bottom row of the 5×8 glyph cell sits,
+        // matching the AWT drawString baseline convention used at all call sites.
+        private void drawCenteredText(Canvas canvas, String text, int baselineY, int scale) {
+            int x = Math.max(0, (logicalWidth - Canvas.stringWidth(text, scale)) / 2);
+            canvas.setBlack();
+            canvas.drawString(text, x, baselineY - Canvas.FONT_H * scale + 1, scale);
         }
 
         private Rectangle clampRect(Rectangle rect) {
@@ -1037,12 +879,12 @@ public final class HardwareValidationTest {
 
     @FunctionalInterface
     private interface ItemRenderer {
-        void render(Graphics2D g, Rectangle bounds);
+        void render(Canvas c, Rectangle bounds);
     }
 
     private static final class ValidationStepFactory {
 
-        private static final Map<String, Optional<BufferedImage>> PNG_CACHE = new HashMap<>();
+        private static final Map<String, Optional<PngReader.PngImage>> PNG_CACHE = new HashMap<>();
 
         private static List<ValidationStep> build(int width, int height) {
             int margin = Math.max(8, Math.min(width, height) / 18);
@@ -1185,65 +1027,33 @@ public final class HardwareValidationTest {
         }
 
         private static ItemRenderer pngIcon(String resourcePath, ItemRenderer fallback) {
-            return (g, bounds) -> {
+            return (c, bounds) -> {
                 var image = loadIcon(resourcePath);
                 if (image.isPresent()) {
-                    // Convert to high-contrast monochrome at the target size. This
-                    // handles alpha (transparent → white) and maps all non-trivially-
-                    // dark pixels to black, matching the eInk display's binary output.
-                    var mono = toMonochrome(image.get(), bounds.width, bounds.height);
-                    g.drawImage(mono, bounds.x, bounds.y, null);
+                    int[] mono = PngReader.toMonochrome(image.get(), bounds.width, bounds.height);
+                    c.drawImage(mono, bounds.width, bounds.height, bounds.x, bounds.y);
                 } else {
-                    fallback.render(g, bounds);
+                    fallback.render(c, bounds);
                 }
             };
         }
 
-        private static BufferedImage toMonochrome(BufferedImage source, int width, int height) {
-            // Composite source (may be ARGB) onto a white background at the target size.
-            var composite = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-            var cg = composite.createGraphics();
-            cg.setColor(Color.WHITE);
-            cg.fillRect(0, 0, width, height);
-            cg.drawImage(source, 0, 0, width, height, null);
-            cg.dispose();
-            // Threshold to pure black/white with high-contrast luminance cutoff (190).
-            var out = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-            for (int y = 0; y < height; y++) {
-                for (int x = 0; x < width; x++) {
-                    int argb = composite.getRGB(x, y);
-                    int a = (argb >>> 24) & 0xFF;
-                    int r = (argb >>> 16) & 0xFF;
-                    int gv = (argb >>> 8) & 0xFF;
-                    int b = argb & 0xFF;
-                    int luminance = (r * 299 + gv * 587 + b * 114) / 1000;
-                    out.setRGB(x, y, (a > 20 && luminance < 190) ? Color.BLACK.getRGB() : Color.WHITE.getRGB());
-                }
-            }
-            return out;
-        }
-
         // Progressive halving to a 512×512 ceiling before caching — prevents huge
         // uncompressed images (e.g. 6000×7000 PNG) from exhausting heap on the Pi Zero.
-        private static BufferedImage scaleDownIcon(BufferedImage source) {
+        private static PngReader.PngImage scaleDownIcon(PngReader.PngImage source) {
             int maxDim = 512;
-            int w = source.getWidth();
-            int h = source.getHeight();
+            int w = source.width();
+            int h = source.height();
+            if (w <= maxDim && h <= maxDim) return source;
             while (w > maxDim || h > maxDim) {
-                int nextW = Math.max(1, w / 2);
-                int nextH = Math.max(1, h / 2);
-                var step = new BufferedImage(nextW, nextH, BufferedImage.TYPE_INT_ARGB);
-                var sg = step.createGraphics();
-                sg.drawImage(source, 0, 0, nextW, nextH, null);
-                sg.dispose();
-                source = step;
-                w = nextW;
-                h = nextH;
+                w = Math.max(1, w / 2);
+                h = Math.max(1, h / 2);
             }
-            return source;
+            int[] scaled = PngReader.toMonochrome(source, w, h);
+            return new PngReader.PngImage(scaled, w, h);
         }
 
-        private static Optional<BufferedImage> loadIcon(String resourcePath) {
+        private static Optional<PngReader.PngImage> loadIcon(String resourcePath) {
             if (PNG_CACHE.containsKey(resourcePath)) {
                 return PNG_CACHE.get(resourcePath);
             }
@@ -1259,9 +1069,9 @@ public final class HardwareValidationTest {
             }
 
             try (InputStream s = stream) {
-                Optional<BufferedImage> loaded = s == null
+                Optional<PngReader.PngImage> loaded = s == null
                     ? Optional.empty()
-                    : Optional.ofNullable(ImageIO.read(s)).map(ValidationStepFactory::scaleDownIcon);
+                    : PngReader.read(s).map(ValidationStepFactory::scaleDownIcon);
                 PNG_CACHE.put(resourcePath, loaded);
                 if (loaded.isEmpty()) {
                     log.warn("PNG icon not found: {} (falling back to drawn shape)", resourcePath);
@@ -1274,114 +1084,117 @@ public final class HardwareValidationTest {
             }
         }
 
-        private static void drawSquare(Graphics2D g, Rectangle r) {
-            g.setColor(Color.BLACK);
-            g.fillRect(r.x, r.y, r.width, r.height);
+        private static void drawSquare(Canvas c, Rectangle r) {
+            c.setBlack();
+            c.fillRect(r.x, r.y, r.width, r.height);
         }
 
-        private static void drawCircle(Graphics2D g, Rectangle r) {
-            g.setColor(Color.BLACK);
-            g.fillOval(r.x, r.y, r.width, r.height);
+        private static void drawCircle(Canvas c, Rectangle r) {
+            c.setBlack();
+            c.fillOval(r.x, r.y, r.width, r.height);
         }
 
-        private static void drawTriangle(Graphics2D g, Rectangle r) {
-            g.setColor(Color.BLACK);
-            var p = new Polygon();
-            p.addPoint(r.x + r.width / 2, r.y);
-            p.addPoint(r.x, r.y + r.height);
-            p.addPoint(r.x + r.width, r.y + r.height);
-            g.fillPolygon(p);
+        private static void drawTriangle(Canvas c, Rectangle r) {
+            c.setBlack();
+            c.fillPolygon(
+                new int[]{r.x + r.width / 2, r.x, r.x + r.width},
+                new int[]{r.y, r.y + r.height, r.y + r.height},
+                3);
         }
 
-        private static void drawCatIcon(Graphics2D g, Rectangle r) {
-            drawIconBadge(g, r);
+        private static void drawCatIcon(Canvas c, Rectangle r) {
+            drawIconBadge(c, r);
             var head = inset(r, 8, 12);
-            g.fillOval(head.x, head.y + 6, head.width, head.height - 10);
-            var leftEar = new Polygon(new int[]{head.x + 4, head.x + 10, head.x + 14},
-                new int[]{head.y + 8, head.y, head.y + 8}, 3);
-            var rightEar = new Polygon(new int[]{head.x + head.width - 14, head.x + head.width - 10, head.x + head.width - 4},
-                new int[]{head.y + 8, head.y, head.y + 8}, 3);
-            g.fillPolygon(leftEar);
-            g.fillPolygon(rightEar);
+            c.setBlack();
+            c.fillOval(head.x, head.y + 6, head.width, head.height - 10);
+            c.fillPolygon(
+                new int[]{head.x + 4, head.x + 10, head.x + 14},
+                new int[]{head.y + 8, head.y, head.y + 8},
+                3);
+            c.fillPolygon(
+                new int[]{head.x + head.width - 14, head.x + head.width - 10, head.x + head.width - 4},
+                new int[]{head.y + 8, head.y, head.y + 8},
+                3);
         }
 
-        private static void drawDogIcon(Graphics2D g, Rectangle r) {
-            drawIconBadge(g, r);
+        private static void drawDogIcon(Canvas c, Rectangle r) {
+            drawIconBadge(c, r);
             var head = inset(r, 8, 12);
-            g.fillOval(head.x + 4, head.y + 6, head.width - 8, head.height - 10);
-            g.fillOval(head.x, head.y + 10, 8, 14);
-            g.fillOval(head.x + head.width - 8, head.y + 10, 8, 14);
+            c.setBlack();
+            c.fillOval(head.x + 4, head.y + 6, head.width - 8, head.height - 10);
+            c.fillOval(head.x, head.y + 10, 8, 14);
+            c.fillOval(head.x + head.width - 8, head.y + 10, 8, 14);
         }
 
-        private static void drawFishIcon(Graphics2D g, Rectangle r) {
-            drawIconBadge(g, r);
+        private static void drawFishIcon(Canvas c, Rectangle r) {
+            drawIconBadge(c, r);
             var body = inset(r, 8, 14);
-            g.fillOval(body.x, body.y + 4, body.width - 10, body.height - 8);
-            var tail = new Polygon();
-            tail.addPoint(body.x + body.width - 8, body.y + body.height / 2);
-            tail.addPoint(body.x + body.width + 2, body.y + 2);
-            tail.addPoint(body.x + body.width + 2, body.y + body.height - 2);
-            g.fillPolygon(tail);
+            c.setBlack();
+            c.fillOval(body.x, body.y + 4, body.width - 10, body.height - 8);
+            c.fillPolygon(
+                new int[]{body.x + body.width - 8, body.x + body.width + 2, body.x + body.width + 2},
+                new int[]{body.y + body.height / 2, body.y + 2, body.y + body.height - 2},
+                3);
         }
 
-        private static void drawIceCreamIcon(Graphics2D g, Rectangle r) {
-            drawIconBadge(g, r);
+        private static void drawIceCreamIcon(Canvas c, Rectangle r) {
+            drawIconBadge(c, r);
             var scoop = inset(r, 10, 8);
-            g.fillOval(scoop.x, scoop.y, scoop.width, scoop.height / 2 + 4);
-            var cone = new Polygon();
-            cone.addPoint(r.x + r.width / 2, r.y + r.height - 4);
-            cone.addPoint(r.x + r.width / 2 - 10, r.y + r.height / 2);
-            cone.addPoint(r.x + r.width / 2 + 10, r.y + r.height / 2);
-            g.fillPolygon(cone);
+            c.setBlack();
+            c.fillOval(scoop.x, scoop.y, scoop.width, scoop.height / 2 + 4);
+            c.fillPolygon(
+                new int[]{r.x + r.width / 2, r.x + r.width / 2 - 10, r.x + r.width / 2 + 10},
+                new int[]{r.y + r.height - 4, r.y + r.height / 2, r.y + r.height / 2},
+                3);
         }
 
-        private static void drawBurgerIcon(Graphics2D g, Rectangle r) {
-            drawIconBadge(g, r);
+        private static void drawBurgerIcon(Canvas c, Rectangle r) {
+            drawIconBadge(c, r);
             int x = r.x + 6;
             int w = r.width - 12;
-            g.fillRoundRect(x, r.y + 10, w, 10, 8, 8);
-            g.fillRect(x + 2, r.y + 22, w - 4, 8);
-            g.fillRoundRect(x, r.y + 30, w, 10, 8, 8);
+            c.setBlack();
+            c.fillRoundRect(x, r.y + 10, w, 10);
+            c.fillRect(x + 2, r.y + 22, w - 4, 8);
+            c.fillRoundRect(x, r.y + 30, w, 10);
         }
 
-        private static void drawAppleIcon(Graphics2D g, Rectangle r) {
-            drawIconBadge(g, r);
-            g.fillOval(r.x + 10, r.y + 10, r.width - 20, r.height - 16);
-            g.fillRect(r.x + r.width / 2 - 1, r.y + 4, 2, 8);
-            var leaf = new Polygon();
-            leaf.addPoint(r.x + r.width / 2 + 2, r.y + 8);
-            leaf.addPoint(r.x + r.width / 2 + 12, r.y + 4);
-            leaf.addPoint(r.x + r.width / 2 + 8, r.y + 12);
-            g.fillPolygon(leaf);
+        private static void drawAppleIcon(Canvas c, Rectangle r) {
+            drawIconBadge(c, r);
+            c.setBlack();
+            c.fillOval(r.x + 10, r.y + 10, r.width - 20, r.height - 16);
+            c.fillRect(r.x + r.width / 2 - 1, r.y + 4, 2, 8);
+            c.fillPolygon(
+                new int[]{r.x + r.width / 2 + 2, r.x + r.width / 2 + 12, r.x + r.width / 2 + 8},
+                new int[]{r.y + 8, r.y + 4, r.y + 12},
+                3);
         }
 
-        private static void drawDarkBackgroundCircle(Graphics2D g, Rectangle r) {
-            g.setColor(Color.BLACK);
-            g.fillRect(r.x, r.y, r.width, r.height);
-            g.setColor(Color.WHITE);
-            g.fillOval(r.x + 5, r.y + 5, r.width - 10, r.height - 10);
-            g.setColor(Color.BLACK);
+        private static void drawDarkBackgroundCircle(Canvas c, Rectangle r) {
+            c.setBlack();
+            c.fillRect(r.x, r.y, r.width, r.height);
+            c.setWhite();
+            c.fillOval(r.x + 5, r.y + 5, r.width - 10, r.height - 10);
+            c.setBlack();
         }
 
-        private static void drawWhiteBackgroundSquare(Graphics2D g, Rectangle r) {
-            g.setColor(Color.BLACK);
-            g.drawRect(r.x, r.y, r.width, r.height);
-            g.fillRect(r.x + 5, r.y + 5, r.width - 10, r.height - 10);
+        private static void drawWhiteBackgroundSquare(Canvas c, Rectangle r) {
+            c.setBlack();
+            c.drawRect(r.x, r.y, r.width, r.height);
+            c.fillRect(r.x + 5, r.y + 5, r.width - 10, r.height - 10);
         }
 
-        private static void drawWhiteBackgroundTriangle(Graphics2D g, Rectangle r) {
-            g.setColor(Color.BLACK);
-            g.drawRect(r.x, r.y, r.width, r.height);
-            var p = new Polygon();
-            p.addPoint(r.x + r.width / 2, r.y + 5);
-            p.addPoint(r.x + 6, r.y + r.height - 5);
-            p.addPoint(r.x + r.width - 6, r.y + r.height - 5);
-            g.fillPolygon(p);
+        private static void drawWhiteBackgroundTriangle(Canvas c, Rectangle r) {
+            c.setBlack();
+            c.drawRect(r.x, r.y, r.width, r.height);
+            c.fillPolygon(
+                new int[]{r.x + r.width / 2, r.x + 6, r.x + r.width - 6},
+                new int[]{r.y + 5, r.y + r.height - 5, r.y + r.height - 5},
+                3);
         }
 
-        private static void drawIconBadge(Graphics2D g, Rectangle r) {
-            g.setColor(Color.BLACK);
-            g.drawRoundRect(r.x, r.y, r.width, r.height, 8, 8);
+        private static void drawIconBadge(Canvas c, Rectangle r) {
+            c.setBlack();
+            c.drawRoundRect(r.x, r.y, r.width, r.height);
         }
 
         private static Rectangle inset(Rectangle r, int dx, int dy) {
@@ -1449,6 +1262,481 @@ public final class HardwareValidationTest {
 
         private Path outputPath() {
             return outputPath;
+        }
+    }
+
+    // Pure-Java pixel buffer for rendering to an eInk display without AWT.
+    // Colour state (black/white) is set before drawing calls, matching the
+    // AWT Graphics2D.setColor() pattern used throughout this class.
+    private static final class Canvas {
+
+        static final int SCALE_SMALL = 1;
+        static final int SCALE_NORMAL = 2;
+        static final int FONT_H = 8;
+        static final int FONT_W = 5;
+
+        // Adafruit GFX 5×8 classic bitmap font — 96 printable ASCII characters
+        // (0x20 space through 0x7E tilde), 5 bytes per character.
+        // Each byte is a column: bit 0 = top pixel, bit 7 = bottom pixel.
+        // Source: Adafruit-GFX-Library/glcdfont.c
+        // Copyright (c) 2012 Adafruit Industries. All rights reserved.
+        // SPDX-License-Identifier: BSD-2-Clause
+        // https://github.com/adafruit/Adafruit-GFX-Library/blob/master/glcdfont.c
+        private static final byte[] FONT = {
+            0x00, 0x00, 0x00, 0x00, 0x00, // ' '
+            0x3E, 0x5B, 0x4F, 0x5B, 0x3E, // '!'
+            0x3E, 0x6B, 0x4F, 0x6B, 0x3E, // '"'
+            0x36, 0x7F, 0x36, 0x7F, 0x36, // '#'
+            0x24, 0x2A, 0x7F, 0x2A, 0x12, // '$'
+            0x23, 0x13, 0x08, 0x64, 0x62, // '%'
+            0x36, 0x49, 0x55, 0x22, 0x50, // '&'
+            0x00, 0x05, 0x03, 0x00, 0x00, // '''
+            0x00, 0x1C, 0x22, 0x41, 0x00, // '('
+            0x00, 0x41, 0x22, 0x1C, 0x00, // ')'
+            0x14, 0x08, 0x3E, 0x08, 0x14, // '*'
+            0x08, 0x08, 0x3E, 0x08, 0x08, // '+'
+            0x00, 0x50, 0x30, 0x00, 0x00, // ','
+            0x08, 0x08, 0x08, 0x08, 0x08, // '-'
+            0x00, 0x60, 0x60, 0x00, 0x00, // '.'
+            0x20, 0x10, 0x08, 0x04, 0x02, // '/'
+            0x3E, 0x51, 0x49, 0x45, 0x3E, // '0'
+            0x00, 0x42, 0x7F, 0x40, 0x00, // '1'
+            0x42, 0x61, 0x51, 0x49, 0x46, // '2'
+            0x21, 0x41, 0x45, 0x4B, 0x31, // '3'
+            0x18, 0x14, 0x12, 0x7F, 0x10, // '4'
+            0x27, 0x45, 0x45, 0x45, 0x39, // '5'
+            0x3C, 0x4A, 0x49, 0x49, 0x30, // '6'
+            0x01, 0x71, 0x09, 0x05, 0x03, // '7'
+            0x36, 0x49, 0x49, 0x49, 0x36, // '8'
+            0x06, 0x49, 0x49, 0x29, 0x1E, // '9'
+            0x00, 0x36, 0x36, 0x00, 0x00, // ':'
+            0x00, 0x56, 0x36, 0x00, 0x00, // ';'
+            0x08, 0x14, 0x22, 0x41, 0x00, // '<'
+            0x14, 0x14, 0x14, 0x14, 0x14, // '='
+            0x00, 0x41, 0x22, 0x14, 0x08, // '>'
+            0x02, 0x01, 0x51, 0x09, 0x06, // '?'
+            0x32, 0x49, 0x79, 0x41, 0x3E, // '@'
+            0x7E, 0x11, 0x11, 0x11, 0x7E, // 'A'
+            0x7F, 0x49, 0x49, 0x49, 0x36, // 'B'
+            0x3E, 0x41, 0x41, 0x41, 0x22, // 'C'
+            0x7F, 0x41, 0x41, 0x22, 0x1C, // 'D'
+            0x7F, 0x49, 0x49, 0x49, 0x41, // 'E'
+            0x7F, 0x09, 0x09, 0x09, 0x01, // 'F'
+            0x3E, 0x41, 0x49, 0x49, 0x7A, // 'G'
+            0x7F, 0x08, 0x08, 0x08, 0x7F, // 'H'
+            0x00, 0x41, 0x7F, 0x41, 0x00, // 'I'
+            0x20, 0x40, 0x41, 0x3F, 0x01, // 'J'
+            0x7F, 0x08, 0x14, 0x22, 0x41, // 'K'
+            0x7F, 0x40, 0x40, 0x40, 0x40, // 'L'
+            0x7F, 0x02, 0x0C, 0x02, 0x7F, // 'M'
+            0x7F, 0x04, 0x08, 0x10, 0x7F, // 'N'
+            0x3E, 0x41, 0x41, 0x41, 0x3E, // 'O'
+            0x7F, 0x09, 0x09, 0x09, 0x06, // 'P'
+            0x3E, 0x41, 0x51, 0x21, 0x5E, // 'Q'
+            0x7F, 0x09, 0x19, 0x29, 0x46, // 'R'
+            0x46, 0x49, 0x49, 0x49, 0x31, // 'S'
+            0x01, 0x01, 0x7F, 0x01, 0x01, // 'T'
+            0x3F, 0x40, 0x40, 0x40, 0x3F, // 'U'
+            0x1F, 0x20, 0x40, 0x20, 0x1F, // 'V'
+            0x3F, 0x40, 0x38, 0x40, 0x3F, // 'W'
+            0x63, 0x14, 0x08, 0x14, 0x63, // 'X'
+            0x07, 0x08, 0x70, 0x08, 0x07, // 'Y'
+            0x61, 0x51, 0x49, 0x45, 0x43, // 'Z'
+            0x00, 0x7F, 0x41, 0x41, 0x00, // '['
+            0x02, 0x04, 0x08, 0x10, 0x20, // '\'
+            0x00, 0x41, 0x41, 0x7F, 0x00, // ']'
+            0x04, 0x02, 0x01, 0x02, 0x04, // '^'
+            0x40, 0x40, 0x40, 0x40, 0x40, // '_'
+            0x00, 0x01, 0x02, 0x04, 0x00, // '`'
+            0x20, 0x54, 0x54, 0x54, 0x78, // 'a'
+            0x7F, 0x48, 0x44, 0x44, 0x38, // 'b'
+            0x38, 0x44, 0x44, 0x44, 0x20, // 'c'
+            0x38, 0x44, 0x44, 0x48, 0x7F, // 'd'
+            0x38, 0x54, 0x54, 0x54, 0x18, // 'e'
+            0x08, 0x7E, 0x09, 0x01, 0x02, // 'f'
+            0x0C, 0x52, 0x52, 0x52, 0x3E, // 'g'
+            0x7F, 0x08, 0x04, 0x04, 0x78, // 'h'
+            0x00, 0x44, 0x7D, 0x40, 0x00, // 'i'
+            0x20, 0x40, 0x44, 0x3D, 0x00, // 'j'
+            0x7F, 0x10, 0x28, 0x44, 0x00, // 'k'
+            0x00, 0x41, 0x7F, 0x40, 0x00, // 'l'
+            0x7C, 0x04, 0x18, 0x04, 0x78, // 'm'
+            0x7C, 0x08, 0x04, 0x04, 0x78, // 'n'
+            0x38, 0x44, 0x44, 0x44, 0x38, // 'o'
+            0x7C, 0x14, 0x14, 0x14, 0x08, // 'p'
+            0x08, 0x14, 0x14, 0x18, 0x7C, // 'q'
+            0x7C, 0x08, 0x04, 0x04, 0x08, // 'r'
+            0x48, 0x54, 0x54, 0x54, 0x20, // 's'
+            0x04, 0x3F, 0x44, 0x40, 0x20, // 't'
+            0x3C, 0x40, 0x40, 0x20, 0x7C, // 'u'
+            0x1C, 0x20, 0x40, 0x20, 0x1C, // 'v'
+            0x3C, 0x40, 0x30, 0x40, 0x3C, // 'w'
+            0x44, 0x28, 0x10, 0x28, 0x44, // 'x'
+            0x0C, 0x50, 0x50, 0x50, 0x3C, // 'y'
+            0x44, 0x64, 0x54, 0x4C, 0x44, // 'z'
+            0x00, 0x08, 0x36, 0x41, 0x00, // '{'
+            0x00, 0x00, 0x7F, 0x00, 0x00, // '|'
+            0x00, 0x41, 0x36, 0x08, 0x00, // '}'
+            0x10, 0x08, 0x08, 0x10, 0x08, // '~'
+        };
+
+        private final int logicalW;
+        private final int logicalH;
+        private final int fbW;
+        private final int fbH;
+        private final Orientation orientation;
+        private final int[] pixels;
+        private int colour = 0xFF000000; // black
+
+        Canvas(int logicalW, int logicalH, int fbW, int fbH, Orientation orientation) {
+            this.logicalW = logicalW;
+            this.logicalH = logicalH;
+            this.fbW = fbW;
+            this.fbH = fbH;
+            this.orientation = orientation;
+            this.pixels = new int[logicalW * logicalH];
+            Arrays.fill(pixels, 0xFFFFFFFF); // white background
+        }
+
+        void setBlack() { colour = 0xFF000000; }
+        void setWhite() { colour = 0xFFFFFFFF; }
+
+        static int stringWidth(String text, int scale) {
+            return text.length() * (FONT_W + 1) * scale;
+        }
+
+        // topY is the top of the glyph cell (bit-0 row of the font data).
+        void drawString(String text, int x, int topY, int scale) {
+            int cx = x;
+            for (int i = 0; i < text.length(); i++) {
+                int ch = text.charAt(i);
+                if (ch < 0x20 || ch > 0x7E) ch = 0x20;
+                int base = (ch - 0x20) * 5;
+                for (int col = 0; col < FONT_W; col++) {
+                    int bits = FONT[base + col] & 0xFF;
+                    for (int row = 0; row < FONT_H; row++) {
+                        if ((bits & (1 << row)) != 0) {
+                            for (int sy = 0; sy < scale; sy++) {
+                                for (int sx = 0; sx < scale; sx++) {
+                                    setPixel(cx + col * scale + sx, topY + row * scale + sy);
+                                }
+                            }
+                        }
+                    }
+                }
+                cx += (FONT_W + 1) * scale; // 1px inter-glyph gap
+            }
+        }
+
+        void drawLine(int x0, int y0, int x1, int y1) {
+            int dx = Math.abs(x1 - x0);
+            int dy = Math.abs(y1 - y0);
+            int sx = x0 < x1 ? 1 : -1;
+            int sy = y0 < y1 ? 1 : -1;
+            int err = dx - dy;
+            while (true) {
+                setPixel(x0, y0);
+                if (x0 == x1 && y0 == y1) break;
+                int e2 = err * 2;
+                if (e2 > -dy) { err -= dy; x0 += sx; }
+                if (e2 < dx) { err += dx; y0 += sy; }
+            }
+        }
+
+        // AWT drawRect semantics: inclusive [x..x+w] × [y..y+h]
+        void drawRect(int x, int y, int w, int h) {
+            drawLine(x, y, x + w, y);
+            drawLine(x + w, y, x + w, y + h);
+            drawLine(x + w, y + h, x, y + h);
+            drawLine(x, y + h, x, y);
+        }
+
+        // drawRoundRect without AWT arcs — square corners are fine on eInk.
+        void drawRoundRect(int x, int y, int w, int h) {
+            drawRect(x, y, w, h);
+        }
+
+        // AWT fillRect semantics: exclusive [x..x+w) × [y..y+h)
+        void fillRect(int x, int y, int w, int h) {
+            for (int py = y; py < y + h; py++) {
+                for (int px = x; px < x + w; px++) {
+                    setPixel(px, py);
+                }
+            }
+        }
+
+        // fillRoundRect — square corners acceptable on eInk.
+        void fillRoundRect(int x, int y, int w, int h) {
+            fillRect(x, y, w, h);
+        }
+
+        // fillOval using scan-line approach; (x,y,w,h) is the bounding box.
+        void fillOval(int x, int y, int w, int h) {
+            double rx = w / 2.0;
+            double ry = h / 2.0;
+            double cx = x + rx;
+            double cy = y + ry;
+            for (int py = y; py < y + h; py++) {
+                double dy = (py + 0.5 - cy) / ry;
+                double span = rx * Math.sqrt(Math.max(0.0, 1.0 - dy * dy));
+                int x0 = (int) Math.ceil(cx - span);
+                int x1 = (int) Math.floor(cx + span);
+                for (int px = x0; px <= x1; px++) {
+                    setPixel(px, py);
+                }
+            }
+        }
+
+        // Fill a polygon defined by n vertices using scan-line rasterisation.
+        void fillPolygon(int[] xs, int[] ys, int n) {
+            if (n < 3) return;
+            int minY = ys[0];
+            int maxY = ys[0];
+            for (int i = 1; i < n; i++) {
+                minY = Math.min(minY, ys[i]);
+                maxY = Math.max(maxY, ys[i]);
+            }
+            var intersections = new ArrayList<Integer>();
+            for (int py = minY; py <= maxY; py++) {
+                intersections.clear();
+                for (int i = 0; i < n; i++) {
+                    int j = (i + 1) % n;
+                    int y0 = ys[i], y1 = ys[j];
+                    if ((y0 <= py && y1 > py) || (y1 <= py && y0 > py)) {
+                        int ix = xs[i] + (py - y0) * (xs[j] - xs[i]) / (y1 - y0);
+                        intersections.add(ix);
+                    }
+                }
+                intersections.sort(Integer::compare);
+                for (int k = 0; k + 1 < intersections.size(); k += 2) {
+                    int x0 = intersections.get(k);
+                    int x1 = intersections.get(k + 1);
+                    for (int px = x0; px <= x1; px++) {
+                        setPixel(px, py);
+                    }
+                }
+            }
+        }
+
+        // Blit a pre-rendered monochrome ARGB pixel array at position (dx, dy).
+        void drawImage(int[] argb, int w, int h, int dx, int dy) {
+            for (int py = 0; py < h; py++) {
+                for (int px = 0; px < w; px++) {
+                    int c = argb[py * w + px];
+                    int r = (c >>> 16) & 0xFF;
+                    int g = (c >>> 8) & 0xFF;
+                    int b = c & 0xFF;
+                    int lum = (r * 299 + g * 587 + b * 114) / 1000;
+                    if (lum < 128) {
+                        int savedColour = colour;
+                        colour = 0xFF000000;
+                        setPixel(dx + px, dy + py);
+                        colour = savedColour;
+                    }
+                }
+            }
+        }
+
+        // Pack the logical pixel buffer into a packed 1-bit-per-pixel framebuffer byte
+        // array, applying the orientation mapping from logical (x,y) to framebuffer (fx,fy).
+        // White pixels → bit 1; black pixels → bit 0 (eInk convention).
+        byte[] packMonochrome() {
+            int fbRowBytes = (fbW + 7) / 8;
+            byte[] out = new byte[fbRowBytes * fbH];
+            Arrays.fill(out, (byte) 0xFF);
+            for (int y = 0; y < logicalH; y++) {
+                for (int x = 0; x < logicalW; x++) {
+                    int rgb = pixels[y * logicalW + x];
+                    int r = (rgb >>> 16) & 0xFF;
+                    int g = (rgb >>> 8) & 0xFF;
+                    int bv = rgb & 0xFF;
+                    int lum = (r * 299 + g * 587 + bv * 114) / 1000;
+                    if (lum < 128) {
+                        int[] mapped = mapToFramebuffer(x, y);
+                        int fx = mapped[0];
+                        int fy = mapped[1];
+                        int idx = fy * fbRowBytes + (fx / 8);
+                        int bit = 7 - (fx % 8);
+                        out[idx] = (byte) (out[idx] & ~(1 << bit));
+                    }
+                }
+            }
+            return out;
+        }
+
+        private void setPixel(int x, int y) {
+            if (x >= 0 && x < logicalW && y >= 0 && y < logicalH) {
+                pixels[y * logicalW + x] = colour;
+            }
+        }
+
+        private int[] mapToFramebuffer(int lx, int ly) {
+            return switch (orientation) {
+                case PORTRAIT -> new int[]{lx, ly};
+                case LANDSCAPE -> new int[]{ly, fbH - 1 - lx};
+                case PORTRAIT_INVERTED -> new int[]{fbW - 1 - lx, fbH - 1 - ly};
+                case LANDSCAPE_INVERTED -> new int[]{fbW - 1 - ly, lx};
+            };
+        }
+    }
+
+    // Minimal PNG decoder using java.util.zip.Inflater — no AWT, safe for GraalVM CE native image.
+    private static final class PngReader {
+
+        record PngImage(int[] pixels, int width, int height) {}
+
+        static Optional<PngImage> read(InputStream in) throws IOException {
+            var buf = new ByteArrayOutputStream();
+            byte[] tmp = new byte[8192];
+            int n;
+            while ((n = in.read(tmp)) != -1) buf.write(tmp, 0, n);
+            byte[] data = buf.toByteArray();
+
+            if (data.length < 8) return Optional.empty();
+
+            // Verify PNG signature: 137 80 78 71 13 10 26 10
+            long sig = 0x89504E470D0A1A0AL;
+            long actual = 0;
+            for (int i = 0; i < 8; i++) actual = (actual << 8) | (data[i] & 0xFF);
+            if (actual != sig) return Optional.empty();
+
+            int width = 0, height = 0, bitDepth = 0, colorType = 0;
+            var idatBuf = new ByteArrayOutputStream();
+            int pos = 8;
+
+            while (pos + 12 <= data.length) {
+                int len = readInt(data, pos);
+                int type = readInt(data, pos + 4);
+                pos += 8;
+                if (type == 0x49484452) { // IHDR
+                    width = readInt(data, pos);
+                    height = readInt(data, pos + 4);
+                    bitDepth = data[pos + 8] & 0xFF;
+                    colorType = data[pos + 9] & 0xFF;
+                } else if (type == 0x49444154) { // IDAT
+                    idatBuf.write(data, pos, len);
+                } else if (type == 0x49454E44) { // IEND
+                    break;
+                }
+                pos += len + 4; // data + CRC
+            }
+
+            if (bitDepth != 8) {
+                log.warn("PngReader: unsupported bit depth {}", bitDepth);
+                return Optional.empty();
+            }
+            int channels = switch (colorType) {
+                case 2 -> 3;  // RGB
+                case 6 -> 4;  // RGBA
+                default -> {
+                    log.warn("PngReader: unsupported color type {}", colorType);
+                    yield -1;
+                }
+            };
+            if (channels == -1) return Optional.empty();
+
+            byte[] compressed = idatBuf.toByteArray();
+            int stride = width * channels + 1; // +1 for filter byte
+            byte[] raw = new byte[stride * height];
+            try {
+                var inflater = new Inflater();
+                inflater.setInput(compressed);
+                inflater.inflate(raw);
+                inflater.end();
+            } catch (DataFormatException e) {
+                log.warn("PngReader: inflate failed", e);
+                return Optional.empty();
+            }
+
+            // Reconstruct with PNG filters (RFC 2083 section 6.3)
+            byte[] prior = new byte[stride];
+            int[] pixels = new int[width * height];
+            for (int y = 0; y < height; y++) {
+                int rowStart = y * stride;
+                int filter = raw[rowStart] & 0xFF;
+                for (int x = 1; x < stride; x++) {
+                    int i = rowStart + x;
+                    int a = x > channels ? (raw[i - channels] & 0xFF) : 0;
+                    int b = prior[x] & 0xFF;
+                    int c = x > channels ? (prior[x - channels] & 0xFF) : 0;
+                    int orig = raw[i] & 0xFF;
+                    raw[i] = (byte) switch (filter) {
+                        case 0 -> orig;
+                        case 1 -> orig + a;
+                        case 2 -> orig + b;
+                        case 3 -> orig + (a + b) / 2;
+                        case 4 -> orig + paeth(a, b, c);
+                        default -> orig;
+                    };
+                }
+                System.arraycopy(raw, rowStart, prior, 0, stride);
+                for (int x = 0; x < width; x++) {
+                    int base = rowStart + 1 + x * channels;
+                    int rv = raw[base] & 0xFF;
+                    int gv = raw[base + 1] & 0xFF;
+                    int bv = raw[base + 2] & 0xFF;
+                    int av = channels == 4 ? (raw[base + 3] & 0xFF) : 255;
+                    pixels[y * width + x] = (av << 24) | (rv << 16) | (gv << 8) | bv;
+                }
+            }
+            return Optional.of(new PngImage(pixels, width, height));
+        }
+
+        // Scale src to (dstW × dstH) using nearest-neighbour and threshold to monochrome.
+        // Transparent pixels (alpha ≤ 20) → white; luminance ≥ 190 → white; else black.
+        static int[] toMonochrome(PngImage src, int dstW, int dstH) {
+            int[] out = new int[dstW * dstH];
+            for (int dy = 0; dy < dstH; dy++) {
+                int sy = dy * src.height() / dstH;
+                for (int dx = 0; dx < dstW; dx++) {
+                    int sx = dx * src.width() / dstW;
+                    int argb = src.pixels()[sy * src.width() + sx];
+                    int a = (argb >>> 24) & 0xFF;
+                    int r = (argb >>> 16) & 0xFF;
+                    int g = (argb >>> 8) & 0xFF;
+                    int b = argb & 0xFF;
+                    int lum = (r * 299 + g * 587 + b * 114) / 1000;
+                    out[dy * dstW + dx] = (a > 20 && lum < 190) ? 0xFF000000 : 0xFFFFFFFF;
+                }
+            }
+            return out;
+        }
+
+        // Same as toMonochrome but treats a lower luminance threshold (128) for stark
+        // high-contrast rendering of the completion screen poster image.
+        static int[] toHighContrastMonochrome(PngImage src, int dstW, int dstH) {
+            int[] out = new int[dstW * dstH];
+            for (int dy = 0; dy < dstH; dy++) {
+                int sy = dy * src.height() / dstH;
+                for (int dx = 0; dx < dstW; dx++) {
+                    int sx = dx * src.width() / dstW;
+                    int argb = src.pixels()[sy * src.width() + sx];
+                    int a = (argb >>> 24) & 0xFF;
+                    int r = (argb >>> 16) & 0xFF;
+                    int g = (argb >>> 8) & 0xFF;
+                    int b = argb & 0xFF;
+                    int lum = (r * 299 + g * 587 + b * 114) / 1000;
+                    out[dy * dstW + dx] = (a > 20 && lum < 128) ? 0xFF000000 : 0xFFFFFFFF;
+                }
+            }
+            return out;
+        }
+
+        private static int readInt(byte[] data, int off) {
+            return ((data[off] & 0xFF) << 24)
+                | ((data[off + 1] & 0xFF) << 16)
+                | ((data[off + 2] & 0xFF) << 8)
+                | (data[off + 3] & 0xFF);
+        }
+
+        private static int paeth(int a, int b, int c) {
+            int p = a + b - c;
+            int pa = Math.abs(p - a);
+            int pb = Math.abs(p - b);
+            int pc = Math.abs(p - c);
+            if (pa <= pb && pa <= pc) return a;
+            if (pb <= pc) return b;
+            return c;
         }
     }
 }
