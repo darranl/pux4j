@@ -17,7 +17,6 @@ import jakarta.json.Json;
 import jakarta.json.JsonObjectBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import java.awt.Rectangle;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -113,8 +112,9 @@ public final class HardwareValidationTest {
             var touchPoller = new TouchPoller(touch, mapper);
 
             var allSteps = ValidationStepFactory.build(logicalWidth, logicalHeight);
-            int selectedScenarioCount = Math.max(1, Math.min(options.scenarioCount, allSteps.size()));
-            var steps = allSteps.subList(0, selectedScenarioCount);
+            int startStep = Math.max(0, Math.min(options.startStep, allSteps.size() - 1));
+            int selectedScenarioCount = Math.max(1, Math.min(options.scenarioCount, allSteps.size() - startStep));
+            var steps = allSteps.subList(startStep, startStep + selectedScenarioCount);
             var results = new ArrayList<StepResult>(steps.size());
             int passedSoFar = 0;
             int failedSoFar = 0;
@@ -362,6 +362,7 @@ public final class HardwareValidationTest {
         int touchRstPin,
         int touchIntPin,
         int scenarioCount,
+        int startStep,
         String notes
     ) {
         private static Options parse(String[] args) {
@@ -380,6 +381,7 @@ public final class HardwareValidationTest {
             int touchRstPin = 22;
             int touchIntPin = 27;
             int scenarioCount = Integer.MAX_VALUE;
+            int startStep = 0;
             String notes = "";
 
             for (int i = 0; i < args.length; i++) {
@@ -404,6 +406,7 @@ public final class HardwareValidationTest {
                     case "--touch-int-pin" -> touchIntPin = Integer.parseInt(requireValue(args, ++i, arg));
                     case "--scenario-count" -> scenarioCount = Integer.parseInt(requireValue(args, ++i, arg));
                     case "--all-scenarios" -> scenarioCount = Integer.MAX_VALUE;
+                    case "--start-step" -> startStep = Integer.parseInt(requireValue(args, ++i, arg)) - 1;
                     case "--notes" -> notes = requireValue(args, ++i, arg);
                     default -> {
                         if (!arg.startsWith("-")) {
@@ -436,6 +439,7 @@ public final class HardwareValidationTest {
                 touchRstPin,
                 touchIntPin,
                 scenarioCount,
+                startStep,
                 notes
             );
         }
@@ -598,7 +602,7 @@ public final class HardwareValidationTest {
             return canvas;
         }
 
-        private void drawChallengeFeedbackOverlay(Canvas canvas, Rectangle correctBounds, boolean pass) {
+        private void drawChallengeFeedbackOverlay(Canvas canvas, Rect correctBounds, boolean pass) {
             int centerX = correctBounds.x + (correctBounds.width / 2);
             int topReserved = 34;
             int bottomReserved = 6;
@@ -637,7 +641,7 @@ public final class HardwareValidationTest {
             }
 
             int ringPad = 4;
-            Rectangle ringRect = clampRect(new Rectangle(
+            Rect ringRect = clampRect(new Rect(
                 correctBounds.x - ringPad,
                 correctBounds.y - ringPad,
                 correctBounds.width + ringPad * 2,
@@ -811,14 +815,14 @@ public final class HardwareValidationTest {
             canvas.drawString(text, x, baselineY - Canvas.FONT_H * scale + 1, scale);
         }
 
-        private Rectangle clampRect(Rectangle rect) {
+        private Rect clampRect(Rect rect) {
             int x = Math.max(0, rect.x);
             int y = Math.max(0, rect.y);
             int maxW = logicalWidth - x;
             int maxH = logicalHeight - y;
             int w = Math.max(1, Math.min(rect.width, maxW));
             int h = Math.max(1, Math.min(rect.height, maxH));
-            return new Rectangle(x, y, w, h);
+            return new Rect(x, y, w, h);
         }
     }
 
@@ -840,7 +844,7 @@ public final class HardwareValidationTest {
 
             var expandedMatches = new ArrayList<ChallengeItem>();
             for (var item : items) {
-                Rectangle expanded = new Rectangle(
+                Rect expanded = new Rect(
                     item.bounds.x - tolerance,
                     item.bounds.y - tolerance,
                     item.bounds.width + tolerance * 2,
@@ -864,22 +868,34 @@ public final class HardwareValidationTest {
             return items.stream().filter(item -> item.name.equals(name)).findFirst();
         }
 
-        private Rectangle expectedRegion() {
+        private Rect expectedRegion() {
             return findByName(correctItem)
                 .map(item -> item.bounds)
                 .orElseThrow(() -> new IllegalStateException("Missing correct item: " + correctItem));
         }
 
-        private Rectangle correctItemBounds() {
+        private Rect correctItemBounds() {
             return expectedRegion();
         }
     }
 
-    private record ChallengeItem(String name, Rectangle bounds, ItemRenderer renderer) {}
+    private static final class Rect {
+        int x, y, width, height;
+
+        Rect(int x, int y, int width, int height) {
+            this.x = x; this.y = y; this.width = width; this.height = height;
+        }
+
+        boolean contains(int px, int py) {
+            return px >= x && px < x + width && py >= y && py < y + height;
+        }
+    }
+
+    private record ChallengeItem(String name, Rect bounds, ItemRenderer renderer) {}
 
     @FunctionalInterface
     private interface ItemRenderer {
-        void render(Canvas c, Rectangle bounds);
+        void render(Canvas c, Rect bounds);
     }
 
     private static final class ValidationStepFactory {
@@ -900,29 +916,29 @@ public final class HardwareValidationTest {
             int iconSlotW = (width - 2 * margin) / 3;
             int icon = Math.min(iconSlotW - 4, height - headerH - margin);
             int iconY = headerH + (height - headerH - margin - icon) / 2;
-            Rectangle iconLeft   = new Rectangle(margin + (iconSlotW - icon) / 2, iconY, icon, icon);
-            Rectangle iconCenter = new Rectangle(margin + iconSlotW + (iconSlotW - icon) / 2, iconY, icon, icon);
-            Rectangle iconRight  = new Rectangle(margin + 2 * iconSlotW + (iconSlotW - icon) / 2, iconY, icon, icon);
+            Rect iconLeft   = new Rect(margin + (iconSlotW - icon) / 2, iconY, icon, icon);
+            Rect iconCenter = new Rect(margin + iconSlotW + (iconSlotW - icon) / 2, iconY, icon, icon);
+            Rect iconRight  = new Rect(margin + 2 * iconSlotW + (iconSlotW - icon) / 2, iconY, icon, icon);
 
-            Rectangle topLeft = new Rectangle(margin, margin + 24, shape, shape);
-            Rectangle topRight = new Rectangle(width - margin - shape, margin + 24, shape, shape);
-            Rectangle bottomLeft = new Rectangle(margin, height - margin - shape, shape, shape);
-            Rectangle bottomRight = new Rectangle(width - margin - shape, height - margin - shape, shape, shape);
-            Rectangle center = centered(width, height, shape, shape);
-            Rectangle bottomCenter = new Rectangle((width - shape) / 2, height - margin - shape, shape, shape);
-            Rectangle topCenter = new Rectangle((width - shape) / 2, margin + 24, shape, shape);
+            Rect topLeft = new Rect(margin, margin + 24, shape, shape);
+            Rect topRight = new Rect(width - margin - shape, margin + 24, shape, shape);
+            Rect bottomLeft = new Rect(margin, height - margin - shape, shape, shape);
+            Rect bottomRight = new Rect(width - margin - shape, height - margin - shape, shape, shape);
+            Rect center = centered(width, height, shape, shape);
+            Rect bottomCenter = new Rect((width - shape) / 2, height - margin - shape, shape, shape);
+            Rect topCenter = new Rect((width - shape) / 2, margin + 24, shape, shape);
 
-            Rectangle largeCenter = centered(width, height, large, large);
-            Rectangle mediumLeft = new Rectangle(margin, height - margin - medium, medium, medium);
-            Rectangle smallRight = new Rectangle(width - margin - small, margin + 28, small, small);
+            Rect largeCenter = centered(width, height, large, large);
+            Rect mediumLeft = new Rect(margin, height - margin - medium, medium, medium);
+            Rect smallRight = new Rect(width - margin - small, margin + 28, small, small);
 
-            Rectangle darkBg = new Rectangle(margin, height / 2 - shape / 2, shape + 10, shape + 10);
-            Rectangle whiteBgTop = new Rectangle(width - margin - shape - 10, margin + 30, shape + 10, shape + 10);
-            Rectangle whiteBgBottom = new Rectangle(width - margin - shape - 10, height - margin - shape - 10, shape + 10, shape + 10);
+            Rect darkBg = new Rect(margin, height / 2 - shape / 2, shape + 10, shape + 10);
+            Rect whiteBgTop = new Rect(width - margin - shape - 10, margin + 30, shape + 10, shape + 10);
+            Rect whiteBgBottom = new Rect(width - margin - shape - 10, height - margin - shape - 10, shape + 10, shape + 10);
 
-            Rectangle step10Small = new Rectangle((width / 2) - (small / 2), height / 2 - (small / 2), small, small);
-            Rectangle step10Large = new Rectangle(margin, margin + 24, large, large);
-            Rectangle step10Medium = new Rectangle(width - margin - medium, height - margin - medium, medium, medium);
+            Rect step10Small = new Rect((width / 2) - (small / 2), height / 2 - (small / 2), small, small);
+            Rect step10Large = new Rect(margin, margin + 24, large, large);
+            Rect step10Medium = new Rect(width - margin - medium, height - margin - medium, medium, medium);
 
             return List.of(
                 new ValidationStep(
@@ -1018,11 +1034,11 @@ public final class HardwareValidationTest {
             );
         }
 
-        private static Rectangle centered(int width, int height, int w, int h) {
-            return new Rectangle((width - w) / 2, (height - h) / 2, w, h);
+        private static Rect centered(int width, int height, int w, int h) {
+            return new Rect((width - w) / 2, (height - h) / 2, w, h);
         }
 
-        private static ChallengeItem item(String name, Rectangle bounds, ItemRenderer renderer) {
+        private static ChallengeItem item(String name, Rect bounds, ItemRenderer renderer) {
             return new ChallengeItem(name, bounds, renderer);
         }
 
@@ -1084,17 +1100,17 @@ public final class HardwareValidationTest {
             }
         }
 
-        private static void drawSquare(Canvas c, Rectangle r) {
+        private static void drawSquare(Canvas c, Rect r) {
             c.setBlack();
             c.fillRect(r.x, r.y, r.width, r.height);
         }
 
-        private static void drawCircle(Canvas c, Rectangle r) {
+        private static void drawCircle(Canvas c, Rect r) {
             c.setBlack();
             c.fillOval(r.x, r.y, r.width, r.height);
         }
 
-        private static void drawTriangle(Canvas c, Rectangle r) {
+        private static void drawTriangle(Canvas c, Rect r) {
             c.setBlack();
             c.fillPolygon(
                 new int[]{r.x + r.width / 2, r.x, r.x + r.width},
@@ -1102,7 +1118,7 @@ public final class HardwareValidationTest {
                 3);
         }
 
-        private static void drawCatIcon(Canvas c, Rectangle r) {
+        private static void drawCatIcon(Canvas c, Rect r) {
             drawIconBadge(c, r);
             var head = inset(r, 8, 12);
             c.setBlack();
@@ -1117,7 +1133,7 @@ public final class HardwareValidationTest {
                 3);
         }
 
-        private static void drawDogIcon(Canvas c, Rectangle r) {
+        private static void drawDogIcon(Canvas c, Rect r) {
             drawIconBadge(c, r);
             var head = inset(r, 8, 12);
             c.setBlack();
@@ -1126,7 +1142,7 @@ public final class HardwareValidationTest {
             c.fillOval(head.x + head.width - 8, head.y + 10, 8, 14);
         }
 
-        private static void drawFishIcon(Canvas c, Rectangle r) {
+        private static void drawFishIcon(Canvas c, Rect r) {
             drawIconBadge(c, r);
             var body = inset(r, 8, 14);
             c.setBlack();
@@ -1137,7 +1153,7 @@ public final class HardwareValidationTest {
                 3);
         }
 
-        private static void drawIceCreamIcon(Canvas c, Rectangle r) {
+        private static void drawIceCreamIcon(Canvas c, Rect r) {
             drawIconBadge(c, r);
             var scoop = inset(r, 10, 8);
             c.setBlack();
@@ -1148,7 +1164,7 @@ public final class HardwareValidationTest {
                 3);
         }
 
-        private static void drawBurgerIcon(Canvas c, Rectangle r) {
+        private static void drawBurgerIcon(Canvas c, Rect r) {
             drawIconBadge(c, r);
             int x = r.x + 6;
             int w = r.width - 12;
@@ -1158,7 +1174,7 @@ public final class HardwareValidationTest {
             c.fillRoundRect(x, r.y + 30, w, 10);
         }
 
-        private static void drawAppleIcon(Canvas c, Rectangle r) {
+        private static void drawAppleIcon(Canvas c, Rect r) {
             drawIconBadge(c, r);
             c.setBlack();
             c.fillOval(r.x + 10, r.y + 10, r.width - 20, r.height - 16);
@@ -1169,7 +1185,7 @@ public final class HardwareValidationTest {
                 3);
         }
 
-        private static void drawDarkBackgroundCircle(Canvas c, Rectangle r) {
+        private static void drawDarkBackgroundCircle(Canvas c, Rect r) {
             c.setBlack();
             c.fillRect(r.x, r.y, r.width, r.height);
             c.setWhite();
@@ -1177,13 +1193,13 @@ public final class HardwareValidationTest {
             c.setBlack();
         }
 
-        private static void drawWhiteBackgroundSquare(Canvas c, Rectangle r) {
+        private static void drawWhiteBackgroundSquare(Canvas c, Rect r) {
             c.setBlack();
             c.drawRect(r.x, r.y, r.width, r.height);
             c.fillRect(r.x + 5, r.y + 5, r.width - 10, r.height - 10);
         }
 
-        private static void drawWhiteBackgroundTriangle(Canvas c, Rectangle r) {
+        private static void drawWhiteBackgroundTriangle(Canvas c, Rect r) {
             c.setBlack();
             c.drawRect(r.x, r.y, r.width, r.height);
             c.fillPolygon(
@@ -1192,13 +1208,13 @@ public final class HardwareValidationTest {
                 3);
         }
 
-        private static void drawIconBadge(Canvas c, Rectangle r) {
+        private static void drawIconBadge(Canvas c, Rect r) {
             c.setBlack();
             c.drawRoundRect(r.x, r.y, r.width, r.height);
         }
 
-        private static Rectangle inset(Rectangle r, int dx, int dy) {
-            return new Rectangle(r.x + dx, r.y + dy, r.width - (2 * dx), r.height - (2 * dy));
+        private static Rect inset(Rect r, int dx, int dy) {
+            return new Rect(r.x + dx, r.y + dy, r.width - (2 * dx), r.height - (2 * dy));
         }
     }
 
@@ -1206,7 +1222,7 @@ public final class HardwareValidationTest {
         int step,
         String title,
         boolean pass,
-        Rectangle expectedRegion,
+        Rect expectedRegion,
         TouchPoint touchPoint,
         Duration elapsed,
         String matchedItem
