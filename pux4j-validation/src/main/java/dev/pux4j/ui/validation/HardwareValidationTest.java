@@ -283,13 +283,13 @@ public final class HardwareValidationTest {
 
     private static DriverConfig createDriverConfig(Options options, int touchI2cAddress) {
         return DriverConfig.builder()
-            .strProperty("orientation", options.orientation.name())
-            .intProperty("dcPin", options.dcPin)
-            .intProperty("rstPin", options.rstPin)
-            .intProperty("busyPin", options.busyPin)
-            .intProperty("touchI2cAddress", touchI2cAddress)
-            .intProperty("touchRstPin", options.touchRstPin)
-            .intProperty("touchIntPin", options.touchIntPin)
+            .property("orientation", options.orientation.name())
+            .property("dcPin", options.dcPin)
+            .property("rstPin", options.rstPin)
+            .property("busyPin", options.busyPin)
+            .property("touchI2cAddress", touchI2cAddress)
+            .property("touchRstPin", options.touchRstPin)
+            .property("touchIntPin", options.touchIntPin)
             .build();
     }
 

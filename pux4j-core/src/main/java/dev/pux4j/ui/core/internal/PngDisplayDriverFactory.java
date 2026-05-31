@@ -16,10 +16,10 @@ public final class PngDisplayDriverFactory implements DisplayDriverFactory {
 
     @Override
     public EInkDisplayDriver create(Pux4jContext context, DriverConfig config) {
-        int width       = config.intProperty("width",  128);
-        int height      = config.intProperty("height", 296);
-        Orientation orientation = Orientation.valueOf(config.strProperty("orientation", "PORTRAIT"));
-        String outputDir = config.strProperty("outputDir", "target/png-frames");
+        int width       = config.property("width",  128);
+        int height      = config.property("height", 296);
+        Orientation orientation = Orientation.valueOf(config.property("orientation", "PORTRAIT"));
+        String outputDir = config.property("outputDir", "target/png-frames");
         return new PngEInkDisplay(width, height, orientation, outputDir);
     }
 }

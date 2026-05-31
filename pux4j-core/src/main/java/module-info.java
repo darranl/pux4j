@@ -14,8 +14,8 @@
  * <h2>Quick start: display write</h2>
  * <pre>{@code
  * dev.pux4j.ui.core.DriverConfig config = dev.pux4j.ui.core.DriverConfig.builder()
- *     .strProperty("orientation", "LANDSCAPE")
- *     .intProperty("dcPin", 25)
+ *     .property("orientation", "LANDSCAPE")
+ *     .property("dcPin", 25)
  *     .build();
  *
  * try (dev.pux4j.ui.core.Pux4jContext context = dev.pux4j.ui.core.Pux4jContext.managed()) {
@@ -37,7 +37,7 @@
  * <h2>Quick start: touch polling</h2>
  * <pre>{@code
  * dev.pux4j.ui.core.DriverConfig config = dev.pux4j.ui.core.DriverConfig.builder()
- *     .intProperty("touchInterruptPin", 17)
+ *     .property("touchInterruptPin", 17)
  *     .build();
  *
  * try (dev.pux4j.ui.core.Pux4jContext context = dev.pux4j.ui.core.Pux4jContext.managed()) {

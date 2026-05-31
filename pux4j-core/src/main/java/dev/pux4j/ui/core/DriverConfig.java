@@ -30,8 +30,8 @@ import java.util.Objects;
  * <p>Example — programmatic:
  * <pre>{@code
  * DriverConfig config = DriverConfig.builder()
- *     .strProperty("orientation", "LANDSCAPE")
- *     .intProperty("dcPin", 25)
+ *     .property("orientation", "LANDSCAPE")
+ *     .property("dcPin", 25)
  *     .build();
  * }</pre>
  */
@@ -82,7 +82,7 @@ public final class DriverConfig {
      * @param defaultValue value returned when the key is absent
      * @return the configured integer value, or {@code defaultValue}
      */
-    public int intProperty(String key, int defaultValue) {
+    public int property(String key, int defaultValue) {
         return intProperties.getOrDefault(key, defaultValue);
     }
 
@@ -93,7 +93,7 @@ public final class DriverConfig {
      * @param defaultValue value returned when the key is absent
      * @return the configured string value, or {@code defaultValue}
      */
-    public String strProperty(String key, String defaultValue) {
+    public String property(String key, String defaultValue) {
         return strProperties.getOrDefault(key, defaultValue);
     }
 
@@ -131,7 +131,7 @@ public final class DriverConfig {
         /**
          * Adds an integer property.
          */
-        public Builder intProperty(String key, int value) {
+        public Builder property(String key, int value) {
             intProperties.put(key, value);
             return this;
         }
@@ -139,7 +139,7 @@ public final class DriverConfig {
         /**
          * Adds a string property.
          */
-        public Builder strProperty(String key, String value) {
+        public Builder property(String key, String value) {
             strProperties.put(key, value);
             return this;
         }

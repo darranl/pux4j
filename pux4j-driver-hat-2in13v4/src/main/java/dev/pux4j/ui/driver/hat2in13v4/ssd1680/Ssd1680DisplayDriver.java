@@ -86,11 +86,11 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
     Ssd1680DisplayDriver(Pux4jContext context, DriverConfig config) {
         Context ctx = context.pi4j();
 
-        orientation = Orientation.valueOf(config.strProperty("orientation", "PORTRAIT"));
+        orientation = Orientation.valueOf(config.property("orientation", "PORTRAIT"));
 
-        int dcPin   = config.intProperty("dcPin",   25);
-        int rstPin  = config.intProperty("rstPin",  17);
-        int busyPin = config.intProperty("busyPin", 24);
+        int dcPin   = config.property("dcPin",   25);
+        int rstPin  = config.property("rstPin",  17);
+        int busyPin = config.property("busyPin", 24);
 
         spi = ctx.create(Spi.newConfigBuilder(ctx)
             .id("ssd1680-spi")
@@ -127,7 +127,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         Arrays.fill(lastFrameBytes, (byte) 0xFF);
         lastFullRefreshTimeMs = System.currentTimeMillis();
 
-        int threshold = config.intProperty("partialRefreshThreshold", 20);
+        int threshold = config.property("partialRefreshThreshold", 20);
         if (threshold > 0) {
             refreshPolicy = RefreshPolicy.afterPartials(threshold);
         }

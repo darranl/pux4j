@@ -54,7 +54,7 @@ public final class DisplaySmokeTest {
         log.info("landscape view: {}px wide x {}px tall", HEIGHT, WIDTH);
 
         DriverConfig config = DriverConfig.builder()
-                .strProperty("orientation", "LANDSCAPE")
+            .property("orientation", "LANDSCAPE")
                 .build();
         try (Pux4jContext ctx = Pux4jContext.managed()) {
             EInkDisplayDriver driver = factory.create(ctx, config);

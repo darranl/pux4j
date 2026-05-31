@@ -38,9 +38,9 @@ final class Gt1151qTouchDriver implements TouchDriver {
     Gt1151qTouchDriver(Pux4jContext context, DriverConfig config) {
         Context ctx = context.pi4j();
 
-        int busAddr  = config.intProperty("touchI2cAddress", 0x14);
-        int trstPin  = config.intProperty("touchRstPin",     22);
-        int intPin   = config.intProperty("touchIntPin",     27);
+        int busAddr  = config.property("touchI2cAddress", 0x14);
+        int trstPin  = config.property("touchRstPin",     22);
+        int intPin   = config.property("touchIntPin",     27);
 
         i2c = ctx.create(I2C.newConfigBuilder(ctx)
             .id("gt1151q-i2c")
