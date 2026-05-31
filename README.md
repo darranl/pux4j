@@ -50,6 +50,28 @@ bin/run-demo.sh                    # JavaFX counter demo (JVM only)
 - **Smoke test**: completes 7 refresh steps and exits; logs show "Step N/7 complete". Any hardware issue will cause an exception.
 - **Hardware validation**: interactive 10-step test prompting you to tap screen targets; writes a pass/fail report to the working directory on exit.
 
+### Build and review Javadoc
+
+`pux4j-core` includes a dedicated Maven profile for Javadoc generation.
+
+From the repository root:
+
+```bash
+mvn -pl pux4j-core -P docs -DskipTests package
+```
+
+Generated API docs are written to:
+
+```text
+pux4j-core/target/reports/apidocs/index.html
+```
+
+Open the generated docs in a browser:
+
+```bash
+xdg-open pux4j-core/target/reports/apidocs/index.html
+```
+
 ### HAT variant selection
 
 Default is `hat-2in9v2` (2.9" HAT with SSD1675A + ICNT86X). For the 2.13" HAT (SSD1680 + GT1151Q), use the `hat-2in13v4` Maven profile and pass `--driver ssd1680 --touch gt1151q` to the run scripts.
