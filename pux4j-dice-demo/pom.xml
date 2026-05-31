@@ -48,4 +48,43 @@
             <scope>runtime</scope>
         </dependency>
     </dependencies>
+
+    <profiles>
+        <profile>
+            <id>dist</id>
+            <properties>
+                <dist.name>pux4j-dice-demo</dist.name>
+                <dist.module>dev.pux4j.ui.dice.demo</dist.module>
+                <dist.main.class>dev.pux4j.ui.dice.demo.DiceDemoApp</dist.main.class>
+                <!-- Override platform to aarch64 so JavaFX classifier deps resolve to Pi-native jars -->
+                <javafx.platform>linux-aarch64</javafx.platform>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-assembly-plugin</artifactId>
+                        <version>3.7.0</version>
+                        <executions>
+                            <execution>
+                                <id>dist</id>
+                                <phase>package</phase>
+                                <goals><goal>single</goal></goals>
+                                <configuration>
+                                    <finalName>${dist.name}</finalName>
+                                    <appendAssemblyId>false</appendAssemblyId>
+                                    <descriptors>
+                                        <descriptor>src/main/assembly/dist.xml</descriptor>
+                                    </descriptors>
+                                    <filteringDelimiters>
+                                        <filteringDelimiter>@</filteringDelimiter>
+                                    </filteringDelimiters>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
