@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.pux4j.ui.driver.hat2in13v4.ssd1680;
 
+import com.pi4j.context.Context;
 import com.pi4j.io.gpio.digital.DigitalInput;
 import com.pi4j.io.gpio.digital.DigitalOutput;
 import com.pi4j.io.gpio.digital.DigitalState;
@@ -9,6 +10,7 @@ import com.pi4j.io.spi.Spi;
 import com.pi4j.io.spi.SpiBus;
 import com.pi4j.io.spi.SpiMode;
 import dev.pux4j.ui.core.AlignmentConstraints;
+import dev.pux4j.ui.core.Pux4jContext;
 import dev.pux4j.ui.core.DisplayCapabilities;
 import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.EInkDisplayDriver;
@@ -26,28 +28,37 @@ import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 final class Ssd1680DisplayDriver implements EInkDisplayDriver {
 
     private static final Logger log = LoggerFactory.getLogger(Ssd1680DisplayDriver.class);
+    private static final ExecutorService DRIVER_EXECUTOR =
+            Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("pux4j-driver-ssd1680-", 0).factory());
     static final int WIDTH        = 122;
     static final int HEIGHT       = 250;
     static final int BYTES_PER_ROW = 16; // ceil(122 / 8) = 16
     static final int FRAME_BYTES   = BYTES_PER_ROW * HEIGHT; // 4000
 
-    // SSD1680 command bytes
+    // SSD1680 command bytes — Solomon Systech SSD1680 datasheet section 9 (command table)
+    // Panel configuration and initialisation commands
     private static final byte CMD_DRIVER_OUTPUT   = 0x01;
-    private static final byte CMD_DEEP_SLEEP      = 0x10;
     private static final byte CMD_DATA_ENTRY_MODE = 0x11;
     private static final byte CMD_SW_RESET        = 0x12;
     private static final byte CMD_TEMP_SENSOR     = 0x18;
     private static final byte CMD_WRITE_TEMP_REG  = 0x1A;
-    private static final byte CMD_ACTIVATE        = 0x20;
+    private static final byte CMD_BORDER_WAVEFORM = 0x3C;
+    // Display update sequence commands
+    private static final byte CMD_ACTIVATE        = 0x20; // Master Activation — triggers the panel refresh cycle
     private static final byte CMD_DISP_UPDATE_1   = 0x21;
-    private static final byte CMD_DISP_UPDATE_2   = 0x22;
+    private static final byte CMD_DISP_UPDATE_2   = 0x22; // Display Update Control 2 — bitmask selects clock/analog/LUT steps
+    // RAM write commands — 0x24 = BW (new frame), 0x26 = RED (previous-frame baseline for partial delta)
     private static final byte CMD_WRITE_BW_RAM    = 0x24;
     private static final byte CMD_WRITE_RED_RAM   = 0x26;
-    private static final byte CMD_BORDER_WAVEFORM = 0x3C;
+    // Deep sleep — CMD 0x10; data 0x01 retains RAM; hardware reset required to wake
+    private static final byte CMD_DEEP_SLEEP      = 0x10;
+    // RAM address window and cursor commands
     private static final byte CMD_SET_X_WINDOW    = 0x44;
     private static final byte CMD_SET_Y_WINDOW    = 0x45;
     private static final byte CMD_SET_X_CURSOR    = 0x4E;
@@ -73,15 +84,14 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
     private long lastFullRefreshTimeMs;
     private RefreshPolicy refreshPolicy = RefreshPolicy.NEVER;
 
-    Ssd1680DisplayDriver(DriverConfig config) {
-        var ctx  = config.pi4j();
-        var json = config.config();
+    Ssd1680DisplayDriver(Pux4jContext context, DriverConfig config) {
+        Context ctx = context.pi4j();
 
-        orientation = Orientation.valueOf(json.getString("orientation", "PORTRAIT"));
+        orientation = Orientation.valueOf(config.strProperty("orientation", "PORTRAIT"));
 
-        int dcPin   = json.getInt("dcPin",   25);
-        int rstPin  = json.getInt("rstPin",  17);
-        int busyPin = json.getInt("busyPin", 24);
+        int dcPin   = config.intProperty("dcPin",   25);
+        int rstPin  = config.intProperty("rstPin",  17);
+        int busyPin = config.intProperty("busyPin", 24);
 
         spi = ctx.create(Spi.newConfigBuilder(ctx)
             .id("ssd1680-spi")
@@ -118,7 +128,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         Arrays.fill(lastFrameBytes, (byte) 0xFF);
         lastFullRefreshTimeMs = System.currentTimeMillis();
 
-        int threshold = json.getInt("partialRefreshThreshold", 20);
+        int threshold = config.intProperty("partialRefreshThreshold", 20);
         if (threshold > 0) {
             refreshPolicy = RefreshPolicy.afterPartials(threshold);
         }
@@ -157,9 +167,11 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
 
     @Override
     public void sleep() {
+        // Enter deep sleep mode — SSD1680 CMD 0x10; data 0x01 = retain RAM.
+        // Follow-up delay allows the power rails to ramp down before any hardware shutdown.
         sendCommand(CMD_DEEP_SLEEP);
         sendData((byte) 0x01);
-        delay(100);
+        delay(100); // Allow power rail to stabilise after deep sleep command
         log.debug("SSD1680 entered deep sleep");
     }
 
@@ -195,9 +207,15 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         }
 
         byte[] data = mf.data();
-        assert x >= 0 && x + width <= WIDTH : "x + width must be <= " + WIDTH;
-        assert y >= 0 && y + height <= HEIGHT : "y + height must be <= " + HEIGHT;
-        assert (x % 8) == 0 : "x must be a multiple of 8 for SSD1680 alignment";
+        if (x < 0 || x + width > WIDTH) {
+            throw new IllegalArgumentException("x + width must be <= " + WIDTH + " (x=" + x + ", width=" + width + ")");
+        }
+        if (y < 0 || y + height > HEIGHT) {
+            throw new IllegalArgumentException("y + height must be <= " + HEIGHT + " (y=" + y + ", height=" + height + ")");
+        }
+        if ((x % 8) != 0) {
+            throw new IllegalArgumentException("x must be a multiple of 8 for SSD1680 alignment (x=" + x + ")");
+        }
 
         return CompletableFuture.runAsync(() -> {
             if (!partialModeConfigured) {
@@ -210,13 +228,14 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             sendCommand(CMD_WRITE_BW_RAM);
             sendData(data);
 
+            // Trigger display update sequence — SSD1680 CMD 0x20 (Master Activation); waits for BUSY to clear after refresh
             sendCommand(CMD_DISP_UPDATE_2);
             sendData((byte) 0xFF);
             sendCommand(CMD_ACTIVATE);
             waitBusy();
 
             partialRefreshCount++;
-        });
+        }, DRIVER_EXECUTOR);
     }
 
     private void configureFullRefreshMode() {
@@ -279,8 +298,10 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
     }
 
     private void configurePartialRefreshMode() {
+        // A brief RST pulse is required before entering partial mode to reset the scan driver
+        // state without triggering a full SW_RESET (which would reload the OTP full-refresh LUT).
         rst.low();
-        delay(1);
+        delay(1); // RST LOW pulse width per SSD1680 hardware reset specification
         rst.high();
 
         sendCommand(CMD_BORDER_WAVEFORM);
@@ -299,8 +320,9 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
     }
 
     private CompletableFuture<Void> writeFullFrame(byte[] data) {
-        assert data.length == FRAME_BYTES : "Frame must be " + FRAME_BYTES + " bytes, was " + data.length;
-
+        if (data.length != FRAME_BYTES) {
+            throw new IllegalArgumentException("writeFullFrame: expected " + FRAME_BYTES + " bytes, got " + data.length);
+        }
         return CompletableFuture.runAsync(() -> {
             configureFullRefreshMode();
 
@@ -313,6 +335,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             sendCommand(CMD_WRITE_RED_RAM);
             sendData(data);
 
+            // Trigger display update sequence — SSD1680 CMD 0x20 (Master Activation); waits for BUSY to clear after refresh
             sendCommand(CMD_DISP_UPDATE_2);
             sendData((byte) 0xF7);
             sendCommand(CMD_ACTIVATE);
@@ -322,12 +345,13 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             partialRefreshCount = 0;
             fastRefreshCount = 0;
             lastFullRefreshTimeMs = System.currentTimeMillis();
-        });
+        }, DRIVER_EXECUTOR);
     }
 
     private CompletableFuture<Void> writeFastFrame(byte[] data) {
-        assert data.length == FRAME_BYTES : "Frame must be " + FRAME_BYTES + " bytes, was " + data.length;
-
+        if (data.length != FRAME_BYTES) {
+            throw new IllegalArgumentException("writeFastFrame: expected " + FRAME_BYTES + " bytes, got " + data.length);
+        }
         return CompletableFuture.runAsync(() -> {
             configureFastRefreshMode();
 
@@ -342,6 +366,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             sendCommand(CMD_WRITE_RED_RAM);
             sendData(data);
 
+            // Trigger display update sequence — SSD1680 CMD 0x20 (Master Activation); waits for BUSY to clear after refresh
             sendCommand(CMD_DISP_UPDATE_2);
             sendData((byte) 0xC7);
             sendCommand(CMD_ACTIVATE);
@@ -350,11 +375,13 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             System.arraycopy(data, 0, lastFrameBytes, 0, FRAME_BYTES);
             fastRefreshCount++;
             partialRefreshCount = 0;
-        });
+        }, DRIVER_EXECUTOR);
     }
 
     private CompletableFuture<Void> writePartialFrame(byte[] data) {
-        assert data.length == FRAME_BYTES : "Frame must be " + FRAME_BYTES + " bytes, was " + data.length;
+        if (data.length != FRAME_BYTES) {
+            throw new IllegalArgumentException("writePartialFrame: expected " + FRAME_BYTES + " bytes, got " + data.length);
+        }
 
         return CompletableFuture.runAsync(() -> {
             if (!partialModeConfigured) {
@@ -373,6 +400,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             sendCommand(CMD_WRITE_BW_RAM);
             sendData(data);
 
+            // Trigger display update sequence — SSD1680 CMD 0x20 (Master Activation); waits for BUSY to clear after refresh
             sendCommand(CMD_DISP_UPDATE_2);
             sendData((byte) 0xFF);
             sendCommand(CMD_ACTIVATE);
@@ -380,7 +408,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
 
             System.arraycopy(data, 0, lastFrameBytes, 0, FRAME_BYTES);
             partialRefreshCount++;
-        });
+        }, DRIVER_EXECUTOR);
     }
 
     private void setWindow(int xStart, int yStart, int xEnd, int yEnd) {
@@ -405,15 +433,18 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
     }
 
     private void hardwareReset() {
+        // Hardware reset sequence per SSD1680 datasheet; RST is active-LOW.
         rst.high();
-        delay(20);
+        delay(20); // RST HIGH settling time per SSD1680 hardware reset specification
         rst.low();
-        delay(2);
+        delay(2);  // RST LOW pulse width per SSD1680 hardware reset specification
         rst.high();
-        delay(20);
+        delay(20); // RST HIGH settling time — allow IC to complete internal power-on reset
     }
 
     private void waitBusy() {
+        // Per SSD1680 spec: BUSY HIGH = IC busy (updating), BUSY LOW = ready for commands.
+        // Polls at 10 ms intervals; requires 3 consecutive LOW readings for debounce stability.
         int stableCount = 0;
         while (stableCount < 3) {
             if (busy.isLow()) {
@@ -421,7 +452,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             } else {
                 stableCount = 0;
             }
-            delay(10);
+            delay(10); // Polling interval — 10 ms between BUSY pin samples
         }
     }
 

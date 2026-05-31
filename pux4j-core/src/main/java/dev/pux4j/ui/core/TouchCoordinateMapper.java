@@ -36,14 +36,27 @@ public final class TouchCoordinateMapper {
     private final boolean flipY;
     private final boolean swapAxes;
 
+    /**
+     * Constructs a mapper with the given display dimensions, touch IC native resolution,
+     * and axis-transform flags.
+     *
+     * @param displayWidth      logical display width in pixels; must be &gt; 0
+     * @param displayHeight     logical display height in pixels; must be &gt; 0
+     * @param touchNativeWidth  touch IC native X range; must be &gt; 0
+     * @param touchNativeHeight touch IC native Y range; must be &gt; 0
+     * @param flipX             reflect the X axis after optional swapAxes
+     * @param flipY             reflect the Y axis after optional swapAxes
+     * @param swapAxes          swap X and Y before flip and scale transforms
+     * @throws IllegalArgumentException if any dimension argument is &lt;= 0
+     */
     public TouchCoordinateMapper(
             int displayWidth, int displayHeight,
             int touchNativeWidth, int touchNativeHeight,
             boolean flipX, boolean flipY, boolean swapAxes) {
-        assert displayWidth  > 0 : "displayWidth must be > 0";
-        assert displayHeight > 0 : "displayHeight must be > 0";
-        assert touchNativeWidth  > 0 : "touchNativeWidth must be > 0";
-        assert touchNativeHeight > 0 : "touchNativeHeight must be > 0";
+        if (displayWidth  <= 0) throw new IllegalArgumentException("displayWidth must be > 0");
+        if (displayHeight <= 0) throw new IllegalArgumentException("displayHeight must be > 0");
+        if (touchNativeWidth  <= 0) throw new IllegalArgumentException("touchNativeWidth must be > 0");
+        if (touchNativeHeight <= 0) throw new IllegalArgumentException("touchNativeHeight must be > 0");
         this.displayWidth     = displayWidth;
         this.displayHeight    = displayHeight;
         this.touchNativeWidth  = touchNativeWidth;
@@ -53,6 +66,13 @@ public final class TouchCoordinateMapper {
         this.swapAxes = swapAxes;
     }
 
+    /**
+     * Applies swapAxes, flip, and scale transforms to a raw {@link TouchPoint},
+     * returning a new point in display logical space clamped to display bounds.
+     *
+     * @param raw touch point in touch IC native coordinate space
+     * @return touch point in display logical coordinate space
+     */
     public TouchPoint map(TouchPoint raw) {
         int x = raw.x();
         int y = raw.y();
@@ -62,8 +82,8 @@ public final class TouchCoordinateMapper {
             x = y;
             y = tmp;
         }
-        if (flipX) x = touchNativeWidth  - 1 - x;
-        if (flipY) y = touchNativeHeight - 1 - y;
+        if (flipX) { x = touchNativeWidth  - 1 - x; }
+        if (flipY) { y = touchNativeHeight - 1 - y; }
 
         x = Math.round((float) x / touchNativeWidth  * displayWidth);
         y = Math.round((float) y / touchNativeHeight * displayHeight);

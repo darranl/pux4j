@@ -13,6 +13,49 @@ application code.
 
 ---
 
+## Getting Started
+
+### Hardware and OS prerequisites
+
+- Raspberry Pi (any model with GPIO; tested on Pi 500+, Pi Zero 2 W)
+- WaveShare Touch e-Paper HAT (2.13" V4 or 2.9" V2)
+- Pi OS 12 (Debian bookworm), aarch64
+- Java 25 or GraalVM CE 25 installed (via sdkman: `sdk install java 25.0.2-tem`)
+
+### Two operating modes
+
+**Mode A — Build and run directly on Pi:**
+```bash
+mvn package -P dist-hat-2in9v2    # or dist-hat-2in13v4
+```
+Then run via the generated distribution scripts.
+
+**Mode B — Build on a laptop, deploy to Pi:**
+```bash
+mvn package -P dist-hat-2in9v2
+# Copy pux4j-validation/target/pux4j-validation-hat-2in9v2.zip to Pi
+# Unzip and run install.sh
+```
+
+### Quick-start commands (on the Pi)
+
+```bash
+bin/run-smoke-test.sh              # 7-step display refresh smoke test
+bin/run-hardware-validation.sh     # 10-step interactive touch validation
+bin/run-demo.sh                    # JavaFX counter demo (JVM only)
+```
+
+### Expected results
+
+- **Smoke test**: completes 7 refresh steps and exits; logs show "Step N/7 complete". Any hardware issue will cause an exception.
+- **Hardware validation**: interactive 10-step test prompting you to tap screen targets; writes a pass/fail report to the working directory on exit.
+
+### HAT variant selection
+
+Default is `hat-2in9v2` (2.9" HAT with SSD1675A + ICNT86X). For the 2.13" HAT (SSD1680 + GT1151Q), use the `hat-2in13v4` Maven profile and pass `--driver ssd1680 --touch gt1151q` to the run scripts.
+
+---
+
 ## Mascot
 
 **Pux** is a sprite, inspired by Puck from *A Midsummer Night's Dream*. A sprite is both a

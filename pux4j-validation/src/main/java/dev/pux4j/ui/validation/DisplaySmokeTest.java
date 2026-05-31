@@ -1,27 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.pux4j.ui.validation;
 
-import com.pi4j.Pi4J;
 import dev.pux4j.ui.core.DisplayDriverFactory;
 import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.EInkDisplayDriver;
 import dev.pux4j.ui.core.MonochromeFrame;
+import dev.pux4j.ui.core.Pux4jContext;
 import dev.pux4j.ui.core.RefreshMode;
-import jakarta.json.Json;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
-import java.util.ServiceLoader;
 
 /**
- * Phase 1 hardware smoke test: exercises all three refresh modes
- * (FULL, FAST, PARTIAL) across a 7-step sequence.
+ * Hardware smoke test that exercises all three refresh modes (FULL, FAST, PARTIAL)
+ * across a 7-step sequence to confirm basic display operation.
  *
  * Supports both 2.9" V2 (SSD1675A) and 2.13" V4 (SSD1680) displays.
  * Display dimensions are queried from the driver at runtime.
  *
- * Usage: java -ea -m dev.pux4j.ui.validation/dev.pux4j.ui.validation.DisplaySmokeTest [driver]
+ * Usage: java -m dev.pux4j.ui.validation/dev.pux4j.ui.validation.DisplaySmokeTest [driver]
  *   driver: "ssd1675a" (2.9" V2) or "ssd1680" (2.13" V4)
  *
  * <p><strong>Framebuffer coordinate system (landscape viewing):</strong><br>
@@ -50,18 +48,16 @@ public final class DisplaySmokeTest {
     public static void main(String[] args) throws Exception {
         String driverName = args.length > 0 ? args[0] : null;
         banner("DisplaySmokeTest starting");
-        var factory = findFactory(driverName);
+        DisplayDriverFactory factory = findFactory(driverName);
         log.info("driver = {}", factory.name());
         log.info("display dimensions = {}x{} native ({} bytes per frame)", WIDTH, HEIGHT, FRAME_BYTES);
         log.info("landscape view: {}px wide x {}px tall", HEIGHT, WIDTH);
 
-        var pi4j = Pi4J.newAutoContext();
-        try {
-            var json = Json.createObjectBuilder()
-                .add("orientation", "LANDSCAPE")
+        DriverConfig config = DriverConfig.builder()
+                .strProperty("orientation", "LANDSCAPE")
                 .build();
-            var config = DriverConfig.ofHardware(pi4j, json);
-            var driver = factory.create(config);
+        try (Pux4jContext ctx = Pux4jContext.managed()) {
+            EInkDisplayDriver driver = factory.create(ctx, config);
 
             banner("INIT");
             long initStart = System.nanoTime();
@@ -142,8 +138,11 @@ public final class DisplaySmokeTest {
             }
             log.info("Step 3 center bytes [{}-2..{}+2]: {}", CENTER_BYTE, CENTER_BYTE, hexDump);
             
-            assert centerValue == (byte)0x00 : "Center of block should be black (0x00), was: 0x" + 
-                String.format("%02X", centerValue & 0xFF);
+            if (centerValue != (byte)0x00) {
+                throw new IllegalStateException(
+                    "Frame generation error: center of block should be black (0x00), was: 0x"
+                    + String.format("%02X", centerValue & 0xFF));
+            }
             
             doPartial(driver, overlayB1, "centre block — solid black");
             sleepWithProgress(4_000, "observe step 3");
@@ -191,8 +190,11 @@ public final class DisplaySmokeTest {
             byte whiteCenterValue = overlayC1[whiteCenterOffset];
             log.info("Step 6 verification: center byte (row={}, byte={}, offset={}) = 0x{} (expect 0xFF)",
                 CENTER_ROW, CENTER_BYTE, whiteCenterOffset, String.format("%02X", whiteCenterValue & 0xFF));
-            assert whiteCenterValue == (byte)0xFF : "Center of white block should be white (0xFF), was: 0x" + 
-                String.format("%02X", whiteCenterValue & 0xFF);
+            if (whiteCenterValue != (byte)0xFF) {
+                throw new IllegalStateException(
+                    "Frame generation error: center of white block should be white (0xFF), was: 0x"
+                    + String.format("%02X", whiteCenterValue & 0xFF));
+            }
             
             doPartial(driver, overlayC1, "centre window — white on checker");
             sleepWithProgress(4_000, "observe step 6");
@@ -222,11 +224,8 @@ public final class DisplaySmokeTest {
         } catch (Exception e) {
             log.error("DisplaySmokeTest: FAILED with exception", e);
             throw e;
-        } finally {
-            log.info("shutting down Pi4J context");
-            pi4j.shutdown();
-            log.info("DisplaySmokeTest: end of run");
         }
+        log.info("DisplaySmokeTest: end of run");
     }
 
     // ── Frame patterns ────────────────────────────────────────────────────────
@@ -353,25 +352,11 @@ public final class DisplaySmokeTest {
     }
 
     private static DisplayDriverFactory findFactory(String name) {
-        var all = ServiceLoader.load(DisplayDriverFactory.class)
-            .stream()
-            .map(ServiceLoader.Provider::get)
-            .toList();
-        if (name != null) {
-            return all.stream()
-                .filter(f -> f.name().equals(name))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException(
-                    "No DisplayDriverFactory named '" + name + "' found via ServiceLoader. "
-                    + "Available: " + all.stream().map(DisplayDriverFactory::name).toList()));
-        }
-        // Auto-select: use the sole non-PNG hardware factory.
-        // In a native binary only one hardware driver module is compiled in.
-        var hardware = all.stream().filter(f -> !f.name().equals("png")).toList();
-        if (hardware.size() == 1) return hardware.get(0);
-        throw new IllegalStateException(
-            "No driver name given; expected 1 non-PNG factory but found " + hardware.size()
-            + ": " + hardware.stream().map(DisplayDriverFactory::name).toList()
-            + ". Pass the driver name as the first argument.");
+        return ServiceLoaderUtil.selectProvider(
+                DisplayDriverFactory.class,
+                DisplayDriverFactory::name,
+                name,
+                f -> f.name().equals("png"),  // exclude headless PNG driver from auto-selection
+                "display driver factory");
     }
 }

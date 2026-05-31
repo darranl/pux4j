@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.pux4j.ui.core;
 
+/**
+ * Pixel encoding format understood by an eInk (or colour LCD) display IC.
+ * A driver declares which formats it accepts via {@link DisplayCapabilities#supportedFormats()}.
+ */
 public enum PixelFormat {
     /** 1-bit packed — both current eInk ICs support this. */
     MONOCHROME,

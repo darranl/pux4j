@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.pux4j.ui.driver.hat2in9v2.icnt86x;
 
+import com.pi4j.context.Context;
+import dev.pux4j.ui.core.Pux4jContext;
 import com.pi4j.io.gpio.digital.DigitalInput;
 import com.pi4j.io.gpio.digital.DigitalOutput;
 import com.pi4j.io.gpio.digital.DigitalState;
@@ -32,13 +34,12 @@ final class Icnt86xTouchDriver implements TouchDriver {
     private final DigitalOutput touchRst;
     private final DigitalInput  touchInt;
 
-    Icnt86xTouchDriver(DriverConfig config) {
-        var ctx  = config.pi4j();
-        var json = config.config();
+    Icnt86xTouchDriver(Pux4jContext context, DriverConfig config) {
+        Context ctx = context.pi4j();
 
-        int busAddr  = json.getInt("touchI2cAddress", 0x48);
-        int trstPin  = json.getInt("touchRstPin",     22);
-        int intPin   = json.getInt("touchIntPin",     27);
+        int busAddr  = config.intProperty("touchI2cAddress", 0x48);
+        int trstPin  = config.intProperty("touchRstPin",     22);
+        int intPin   = config.intProperty("touchIntPin",     27);
 
         i2c = ctx.create(I2C.newConfigBuilder(ctx)
             .id("icnt86x-i2c")
@@ -95,13 +96,16 @@ final class Icnt86xTouchDriver implements TouchDriver {
         }
         log.debug("ICNT86X: INT asserted (LOW) — reading touch data");
 
+        // Read touch point count from ICNT86X register 0x1001 (1 byte).
+        // Non-zero value means that many touch points are ready at 0x1002.
         byte[] countBuf = new byte[1];
         readRegister(REG_TOUCH_COUNT, countBuf);
         int count = countBuf[0] & 0xFF;
 
         if (count == 0) {
+            // Write 0x00 to REG_TOUCH_COUNT (0x1001) to acknowledge and release the INT pin HIGH
             writeRegister(REG_TOUCH_COUNT, (byte)0x00);
-            delay(1);
+            delay(1); // TODO: verify this delay is still required; may be removable once hardware behaviour is confirmed
             return Collections.emptyList();
         }
 
@@ -111,8 +115,10 @@ final class Icnt86xTouchDriver implements TouchDriver {
             return Collections.emptyList();
         }
 
+        // Read touch point coordinates from ICNT86X register 0x1002 (7 bytes per point).
         byte[] pointData = new byte[count * BYTES_PER_POINT];
         readRegister(REG_TOUCH_DATA, pointData);
+        // Write 0x00 to REG_TOUCH_COUNT (0x1001) to acknowledge the interrupt — releases INT pin HIGH
         writeRegister(REG_TOUCH_COUNT, (byte)0x00);
 
         List<TouchPoint> points = new ArrayList<>(count);
@@ -144,12 +150,13 @@ final class Icnt86xTouchDriver implements TouchDriver {
     // --- GPIO helpers ---
 
     private void hardwareReset() {
+        // ICNT86X hardware reset per ICNT86X datasheet: RST is active-LOW with 100 ms settling on each phase.
         touchRst.state(DigitalState.HIGH);
-        delay(100);
+        delay(100); // Allow RST HIGH to fully settle before pulling LOW
         touchRst.state(DigitalState.LOW);
-        delay(100);
+        delay(100); // RST LOW hold time — IC performs internal reset sequence
         touchRst.state(DigitalState.HIGH);
-        delay(100);
+        delay(100); // Post-reset settling time before first I2C access
     }
 
     private static void delay(long ms) {

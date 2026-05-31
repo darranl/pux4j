@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.pux4j.ui.core;
 
+/**
+ * Display refresh waveform mode, passed to {@link EInkDisplayDriver#writeFrame}.
+ * The installed {@link RefreshPolicy} may override the requested mode and force a
+ * {@link #FULL} refresh when partial drift thresholds are exceeded.
+ */
 public enum RefreshMode {
     /** Full waveform refresh with visible flash; clears ghosting. SSD1675A ~3 s, SSD1680 ~2 s. */
     FULL,

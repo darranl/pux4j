@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.pux4j.ui.driver.hat2in13v4.gt1151q;
 
+import com.pi4j.context.Context;
+import dev.pux4j.ui.core.Pux4jContext;
 import com.pi4j.io.gpio.digital.DigitalInput;
 import com.pi4j.io.gpio.digital.DigitalOutput;
 import com.pi4j.io.gpio.digital.DigitalState;
@@ -33,13 +35,12 @@ final class Gt1151qTouchDriver implements TouchDriver {
     private final DigitalOutput touchRst;
     private final DigitalInput  touchInt;
 
-    Gt1151qTouchDriver(DriverConfig config) {
-        var ctx  = config.pi4j();
-        var json = config.config();
+    Gt1151qTouchDriver(Pux4jContext context, DriverConfig config) {
+        Context ctx = context.pi4j();
 
-        int busAddr  = json.getInt("touchI2cAddress", 0x14);
-        int trstPin  = json.getInt("touchRstPin",     22);
-        int intPin   = json.getInt("touchIntPin",     27);
+        int busAddr  = config.intProperty("touchI2cAddress", 0x14);
+        int trstPin  = config.intProperty("touchRstPin",     22);
+        int intPin   = config.intProperty("touchIntPin",     27);
 
         i2c = ctx.create(I2C.newConfigBuilder(ctx)
             .id("gt1151q-i2c")
@@ -89,11 +90,15 @@ final class Gt1151qTouchDriver implements TouchDriver {
 
     @Override
     public List<TouchPoint> readTouches() {
+        // INT pin is active-LOW: the GT1151Q drives it LOW when new touch data is available.
+        // If INT is HIGH there is no pending event — skip I2C entirely to avoid unnecessary bus traffic.
         if (touchInt.isHigh()) {
             return Collections.emptyList();
         }
         log.debug("GT1151Q: INT asserted (LOW) — reading touch data");
 
+        // Read touch point count and status from GT1151Q status register 0x814E (1 byte).
+        // Bit 7 = buffer ready flag; bits [3:0] = number of touch points currently detected.
         byte[] statusBuf = new byte[1];
         readRegister(REG_TOUCH_STATUS, statusBuf);
         int status = statusBuf[0] & 0xFF;
@@ -114,8 +119,10 @@ final class Gt1151qTouchDriver implements TouchDriver {
             return Collections.emptyList();
         }
 
+        // Read touch point coordinates from GT1151Q data register 0x814F (8 bytes per point).
         byte[] pointData = new byte[touchCount * BYTES_PER_POINT];
         readRegister(REG_TOUCH_DATA, pointData);
+        // Write 0x00 to REG_TOUCH_STATUS (0x814E) to acknowledge the interrupt — releases the INT pin HIGH
         writeRegister(REG_TOUCH_STATUS, (byte) 0x00);
 
         List<TouchPoint> points = new ArrayList<>(touchCount);
@@ -144,12 +151,13 @@ final class Gt1151qTouchDriver implements TouchDriver {
     }
 
     private void hardwareReset() {
+        // GT1151Q hardware reset per GT1151Q datasheet: RST is active-LOW with 100 ms settling on each phase.
         touchRst.state(DigitalState.HIGH);
-        delay(100);
+        delay(100); // Allow RST HIGH to fully settle before pulling LOW
         touchRst.state(DigitalState.LOW);
-        delay(100);
+        delay(100); // RST LOW hold time — IC performs internal reset sequence
         touchRst.state(DigitalState.HIGH);
-        delay(100);
+        delay(100); // Post-reset settling time before first I2C access
     }
 
     private void delay(int ms) {

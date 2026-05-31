@@ -2,6 +2,7 @@
 package dev.pux4j.ui.driver.hat2in13v4.gt1151q;
 
 import dev.pux4j.ui.core.DriverConfig;
+import dev.pux4j.ui.core.Pux4jContext;
 import dev.pux4j.ui.core.TouchDriver;
 import dev.pux4j.ui.core.TouchDriverFactory;
 
@@ -11,7 +12,7 @@ public final class Gt1151qTouchDriverFactory implements TouchDriverFactory {
     public String name() { return "gt1151q"; }
 
     @Override
-    public TouchDriver create(DriverConfig config) {
-        return new Gt1151qTouchDriver(config);
+    public TouchDriver create(Pux4jContext context, DriverConfig config) {
+        return new Gt1151qTouchDriver(context, config);
     }
 }

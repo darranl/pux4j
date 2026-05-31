@@ -4,6 +4,7 @@ package dev.pux4j.ui.driver.hat2in9v2.ssd1675a;
 import dev.pux4j.ui.core.DisplayDriverFactory;
 import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.EInkDisplayDriver;
+import dev.pux4j.ui.core.Pux4jContext;
 
 public final class Ssd1675aDisplayDriverFactory implements DisplayDriverFactory {
 
@@ -11,7 +12,7 @@ public final class Ssd1675aDisplayDriverFactory implements DisplayDriverFactory 
     public String name() { return "ssd1675a"; }
 
     @Override
-    public EInkDisplayDriver create(DriverConfig config) {
-        return new Ssd1675aDisplayDriver(config);
+    public EInkDisplayDriver create(Pux4jContext context, DriverConfig config) {
+        return new Ssd1675aDisplayDriver(context, config);
     }
 }
