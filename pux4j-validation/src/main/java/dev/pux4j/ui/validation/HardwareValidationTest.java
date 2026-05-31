@@ -33,6 +33,9 @@ import java.util.Optional;
 import java.util.ServiceLoader;
 import java.util.concurrent.CompletableFuture;
 
+import static dev.pux4j.ui.validation.ValidationMessages.format;
+import static dev.pux4j.ui.validation.ValidationMessages.text;
+
 /**
  * Interactive 10-step hardware acceptance test.
  * Validates a paired EInkDisplayDriver and TouchDriver end-to-end.
@@ -239,7 +242,7 @@ public final class HardwareValidationTest {
         log.info("PHASE step={} instruction: instruction rendered; waiting for proceed tap (hint timeout {} ms)",
             step, INSTRUCTION_HINT_TIMEOUT.toMillis());
         TouchPoller.sleep(DISPLAY_SETTLE_AFTER_REFRESH);
-        waitForTapWithPrompt(display, renderer, touchPoller, image, INSTRUCTION_HINT_TIMEOUT, "Tap to advance");
+        waitForTapWithPrompt(display, renderer, touchPoller, image, INSTRUCTION_HINT_TIMEOUT, text("prompt.tapToAdvance"));
         log.info("PHASE step={} instruction: proceed tap received", step);
     }
 
@@ -302,20 +305,25 @@ public final class HardwareValidationTest {
             return all.stream()
                 .filter(instance -> instanceName(instance).equals(name))
                 .findFirst()
-                .orElseThrow(() -> new IllegalStateException(
-                    "No " + label + " named '" + name + "' found via ServiceLoader. "
-                    + "Available: " + all.stream().map(HardwareValidationTest::instanceName).toList()));
+                .orElseThrow(() -> new IllegalStateException(format(
+                    "cli.error.noNamedProvider",
+                    label,
+                    name,
+                    all.stream().map(HardwareValidationTest::instanceName).toList())));
         }
         // Auto-select: for DisplayDriverFactory filter out the headless "png" stub.
         // In a native binary only one hardware driver module is compiled in.
         var candidates = (type == DisplayDriverFactory.class)
             ? all.stream().filter(i -> !instanceName(i).equals("png")).toList()
             : all;
-        if (candidates.size() == 1) return candidates.get(0);
-        throw new IllegalStateException(
-            "No " + label + " name given; expected 1 provider but found " + candidates.size()
-            + ": " + candidates.stream().map(HardwareValidationTest::instanceName).toList()
-            + ". Specify with --display/--touch.");
+        if (candidates.size() == 1) {
+            return candidates.get(0);
+        }
+        throw new IllegalStateException(format(
+            "cli.error.providerCount",
+            label,
+            candidates.size(),
+            candidates.stream().map(HardwareValidationTest::instanceName).toList()));
     }
 
     private static String instanceName(Object instance) {
@@ -438,7 +446,10 @@ public final class HardwareValidationTest {
 
         private static String requireValue(String[] args, int idx, String option) {
             if (idx >= args.length) {
-                throw new IllegalArgumentException("Missing value for " + option);
+                throw new IllegalArgumentException(format("cli.error.missingValue", option));
+            }
+            if (args[idx].startsWith("--")) {
+                throw new IllegalArgumentException(format("cli.error.missingValue", option));
             }
             return args[idx];
         }
@@ -575,7 +586,7 @@ public final class HardwareValidationTest {
 
         private Canvas renderInstruction(int step, int total, String instruction, int passed, int failed) {
             var canvas = blankCanvas();
-            drawHeader(canvas, "Step " + step + " / " + total, "Instruction", passed, failed);
+            drawHeader(canvas, format("header.stepCounter", step, total), text("header.instruction"), passed, failed);
             drawWrappedCentered(canvas, instruction, logicalHeight / 2 - 10, 20, Canvas.SCALE_NORMAL);
             return canvas;
         }
@@ -587,7 +598,7 @@ public final class HardwareValidationTest {
                                        int passed,
                                        int failed) {
             var canvas = blankCanvas();
-            drawHeader(canvas, "Step " + step + " / " + total, instruction, passed, failed);
+            drawHeader(canvas, format("header.stepCounter", step, total), instruction, passed, failed);
             for (var item : items) {
                 item.renderer.render(canvas, item.bounds);
             }
@@ -649,8 +660,8 @@ public final class HardwareValidationTest {
             }
 
             var canvas = blankCanvas();
-            drawHeader(canvas, "Validation Complete", "Pux", passed, failed);
-            drawCenteredText(canvas, "COMPLETE", 44, Canvas.SCALE_NORMAL);
+            drawHeader(canvas, text("header.validationComplete"), text("header.brand"), passed, failed);
+            drawCenteredText(canvas, text("screen.complete"), 44, Canvas.SCALE_NORMAL);
             PngReader.PngImage src = poster.get();
 
             int availableTop = 50;
@@ -671,17 +682,17 @@ public final class HardwareValidationTest {
             canvas.setBlack();
             canvas.drawRect(drawX, drawY, Math.max(0, drawW - 1), Math.max(0, drawH - 1));
 
-            drawCenteredText(canvas, "Passed: " + passed + "   Failed: " + failed,
+            drawCenteredText(canvas, format("screen.score", passed, failed),
                 logicalHeight - 12, Canvas.SCALE_SMALL);
             return canvas;
         }
 
         private Canvas renderFallbackCompletion(int passed, int failed, Path reportPath) {
             var canvas = blankCanvas();
-            drawHeader(canvas, "Validation Complete", "Summary", passed, failed);
-            drawCenteredText(canvas, "Passed: " + passed, logicalHeight / 2 - 10, Canvas.SCALE_NORMAL);
-            drawCenteredText(canvas, "Failed: " + failed, logicalHeight / 2 + 10, Canvas.SCALE_NORMAL);
-            drawWrappedCentered(canvas, "Report: " + reportPath.getFileName(),
+            drawHeader(canvas, text("header.validationComplete"), text("header.summary"), passed, failed);
+            drawCenteredText(canvas, text("report.passed") + passed, logicalHeight / 2 - 10, Canvas.SCALE_NORMAL);
+            drawCenteredText(canvas, text("report.failed") + failed, logicalHeight / 2 + 10, Canvas.SCALE_NORMAL);
+            drawWrappedCentered(canvas, format("screen.report", reportPath.getFileName()),
                 logicalHeight - 14, 14, Canvas.SCALE_SMALL);
             return canvas;
         }
@@ -934,7 +945,7 @@ public final class HardwareValidationTest {
 
             return List.of(
                 new ValidationStep(
-                    "Touch the CIRCLE",
+                    text("step.1"),
                     "CIRCLE",
                     List.of(
                         item("CIRCLE", center, ValidationStepFactory::drawCircle),
@@ -943,7 +954,7 @@ public final class HardwareValidationTest {
                     )
                 ),
                 new ValidationStep(
-                    "Touch the shape in the TOP-LEFT",
+                    text("step.2"),
                     "TOP_LEFT_BOX",
                     List.of(
                         item("TOP_LEFT_BOX", topLeft, ValidationStepFactory::drawSquare),
@@ -952,7 +963,7 @@ public final class HardwareValidationTest {
                     )
                 ),
                 new ValidationStep(
-                    "Touch the shape in the TOP-RIGHT",
+                    text("step.3"),
                     "TOP_RIGHT_CIRCLE",
                     List.of(
                         item("TOP_RIGHT_CIRCLE", topRight, ValidationStepFactory::drawCircle),
@@ -961,7 +972,7 @@ public final class HardwareValidationTest {
                     )
                 ),
                 new ValidationStep(
-                    "Touch the shape in the BOTTOM-LEFT",
+                    text("step.4"),
                     "BOTTOM_LEFT_TRIANGLE",
                     List.of(
                         item("BOTTOM_LEFT_TRIANGLE", bottomLeft, ValidationStepFactory::drawTriangle),
@@ -970,7 +981,7 @@ public final class HardwareValidationTest {
                     )
                 ),
                 new ValidationStep(
-                    "Touch the shape in the BOTTOM-RIGHT",
+                    text("step.5"),
                     "BOTTOM_RIGHT_BOX",
                     List.of(
                         item("BOTTOM_RIGHT_BOX", bottomRight, ValidationStepFactory::drawSquare),
@@ -979,7 +990,7 @@ public final class HardwareValidationTest {
                     )
                 ),
                 new ValidationStep(
-                    "Touch the CAT",
+                    text("step.6"),
                     "CAT",
                     List.of(
                         item("CAT", iconLeft, pngIcon("icons/cat.png", ValidationStepFactory::drawCatIcon)),
@@ -988,7 +999,7 @@ public final class HardwareValidationTest {
                     )
                 ),
                 new ValidationStep(
-                    "Touch the ICE CREAM",
+                    text("step.7"),
                     "ICE_CREAM",
                     List.of(
                         item("ICE_CREAM", iconLeft, pngIcon("icons/ice-cream.png", ValidationStepFactory::drawIceCreamIcon)),
@@ -997,7 +1008,7 @@ public final class HardwareValidationTest {
                     )
                 ),
                 new ValidationStep(
-                    "Touch the LARGE circle",
+                    text("step.8"),
                     "LARGE_CIRCLE",
                     List.of(
                         item("LARGE_CIRCLE", largeCenter, ValidationStepFactory::drawCircle),
@@ -1006,7 +1017,7 @@ public final class HardwareValidationTest {
                     )
                 ),
                 new ValidationStep(
-                    "Touch the item with a DARK background",
+                    text("step.9"),
                     "DARK_BG",
                     List.of(
                         item("DARK_BG", darkBg, ValidationStepFactory::drawDarkBackgroundCircle),
@@ -1015,7 +1026,7 @@ public final class HardwareValidationTest {
                     )
                 ),
                 new ValidationStep(
-                    "Touch the SMALL shape",
+                    text("step.10"),
                     "SMALL_BOX",
                     List.of(
                         item("SMALL_BOX", step10Small, ValidationStepFactory::drawSquare),
@@ -1228,43 +1239,43 @@ public final class HardwareValidationTest {
             String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
             outputPath = Path.of("validation-report-" + timestamp + ".txt");
 
-            sb.append("Hardware Validation Test Report\n");
-            sb.append("================================\n");
-            sb.append("Date:   ").append(LocalDateTime.now()).append('\n');
-            sb.append("Driver: ").append(driverName).append('\n');
-            sb.append("Notes:  ").append(notes == null || notes.isBlank() ? "-" : notes).append("\n\n");
+            sb.append(text("report.title")).append('\n');
+            sb.append(text("report.separator.main")).append('\n');
+            sb.append(text("report.date")).append(LocalDateTime.now()).append('\n');
+            sb.append(text("report.driver")).append(driverName).append('\n');
+            sb.append(text("report.notes")).append(notes == null || notes.isBlank() ? "-" : notes).append("\n\n");
 
             Files.writeString(outputPath, sb.toString(), StandardCharsets.UTF_8);
         }
 
         private void append(StepResult result) {
-            sb.append("Step ").append(result.step()).append(": ").append(result.title()).append('\n');
-            sb.append("  Result:          ").append(result.pass() ? "PASS" : "FAIL").append('\n');
-            sb.append("  Expected region: (")
+            sb.append(text("report.step")).append(result.step()).append(": ").append(result.title()).append('\n');
+            sb.append(text("report.result")).append(result.pass() ? "PASS" : "FAIL").append('\n');
+            sb.append(text("report.expectedRegion"))
                 .append(result.expectedRegion().x).append(", ")
                 .append(result.expectedRegion().y).append(", ")
                 .append(result.expectedRegion().width).append(", ")
                 .append(result.expectedRegion().height).append(")\n");
-            sb.append("  Touch received:  (")
+            sb.append(text("report.touchReceived"))
                 .append(result.touchPoint().x()).append(", ")
                 .append(result.touchPoint().y()).append(")")
-                .append(" after ").append(String.format(Locale.ROOT, "%.1f", result.elapsed().toMillis() / 1000.0)).append(" s\n");
-            sb.append("  Matched item:    ").append(result.matchedItem()).append("\n\n");
+                .append(text("report.after")).append(String.format(Locale.ROOT, "%.1f", result.elapsed().toMillis() / 1000.0)).append(text("report.secondsSuffix")).append('\n');
+            sb.append(text("report.matchedItem")).append(result.matchedItem()).append("\n\n");
         }
 
         private void finish(int passed, int failed) throws IOException {
-            sb.append("Summary\n");
-            sb.append("-------\n");
-            sb.append("Passed:  ").append(passed).append(" / ").append(passed + failed).append('\n');
-            sb.append("Failed:  ").append(failed).append(" / ").append(passed + failed).append('\n');
+            sb.append(text("report.summary")).append('\n');
+            sb.append(text("report.separator.summary")).append('\n');
+            sb.append(text("report.passed")).append(passed).append(" / ").append(passed + failed).append('\n');
+            sb.append(text("report.failed")).append(failed).append(" / ").append(passed + failed).append('\n');
             Files.writeString(outputPath, sb.toString(), StandardCharsets.UTF_8);
         }
 
         private void finishWithFailure(Exception failure) throws IOException {
-            sb.append("Summary\n");
-            sb.append("-------\n");
-            sb.append("Run terminated with failure: ").append(failure.getClass().getSimpleName())
-                .append(" - ").append(failure.getMessage() == null ? "<no message>" : failure.getMessage()).append('\n');
+            sb.append(text("report.summary")).append('\n');
+            sb.append(text("report.separator.summary")).append('\n');
+            sb.append(text("report.failurePrefix")).append(failure.getClass().getSimpleName())
+                .append(" - ").append(failure.getMessage() == null ? text("report.failureNoMessage") : failure.getMessage()).append('\n');
             Files.writeString(outputPath, sb.toString(), StandardCharsets.UTF_8);
         }
 
