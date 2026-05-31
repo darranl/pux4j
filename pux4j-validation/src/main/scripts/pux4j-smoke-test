@@ -14,6 +14,7 @@ LIB_DIR="$(cd "$SCRIPT_DIR/../lib" && pwd)"
 BYTEMAN_DIR="$(cd "$SCRIPT_DIR/../byteman" && pwd)"
 ENABLE_BYTEMAN=0
 ENABLE_IOCTL_TRACE=0
+ENABLE_PARTIAL_TRACE=0
 DRIVER=""
 
 while [[ $# -gt 0 ]]; do
@@ -26,6 +27,10 @@ while [[ $# -gt 0 ]]; do
       ENABLE_IOCTL_TRACE=1
       shift
       ;;
+    --enable-partial-trace)
+      ENABLE_PARTIAL_TRACE=1
+      shift
+      ;;
     --help|-h)
       cat <<'HELP_EOF'
 Usage: pux4j-smoke-test [OPTIONS] [DRIVER]
@@ -36,9 +41,10 @@ Arguments:
 Options:
   --enable-byteman          Enable driver-level ByteMan tracing (hardware-trace.btm)
   --enable-ioctl-trace      Enable ioctl-level ByteMan tracing (ioctl-trace.btm)
+  --enable-partial-trace    Enable sendData array-corruption detection (partial-corruption-check.btm)
   --help, -h                Show this help
 
-Both flags can be combined. ByteMan tracing requires BYTEMAN_HOME to be set.
+Flags can be combined. ByteMan tracing requires BYTEMAN_HOME to be set.
 Trace log: ~/log/pux4j-smoke-test-YYYYMMDD-HHMMSS.log
 HELP_EOF
       exit 0
@@ -74,7 +80,7 @@ JAVA_OPTS=(
 LOG_DIR="$HOME/log"
 LOG_FILE="/dev/null"
 
-if [[ $ENABLE_BYTEMAN -eq 1 || $ENABLE_IOCTL_TRACE -eq 1 ]]; then
+if [[ $ENABLE_BYTEMAN -eq 1 || $ENABLE_IOCTL_TRACE -eq 1 || $ENABLE_PARTIAL_TRACE -eq 1 ]]; then
   if [[ -z "${BYTEMAN_HOME:-}" ]]; then
     echo "ERROR: BYTEMAN_HOME not set. Run: source ~/.profile"
     exit 1
@@ -110,6 +116,17 @@ if [[ $ENABLE_BYTEMAN -eq 1 || $ENABLE_IOCTL_TRACE -eq 1 ]]; then
     SCRIPTS="${SCRIPTS}script:$IOCTL_RULES"
     echo "ioctl-level tracing enabled   [IOCTL]"
     echo "  Rules: $IOCTL_RULES"
+  fi
+  if [[ $ENABLE_PARTIAL_TRACE -eq 1 ]]; then
+    PARTIAL_RULES="$BYTEMAN_DIR/partial-corruption-check.btm"
+    if [[ ! -f "$PARTIAL_RULES" ]]; then
+      echo "ERROR: ByteMan rules not found: $PARTIAL_RULES"
+      exit 1
+    fi
+    [[ -n "$SCRIPTS" ]] && SCRIPTS="$SCRIPTS,"
+    SCRIPTS="${SCRIPTS}script:$PARTIAL_RULES"
+    echo "Partial corruption check enabled [CORRUPT]"
+    echo "  Rules: $PARTIAL_RULES"
   fi
   echo "  Log:   $LOG_FILE"
   echo ""

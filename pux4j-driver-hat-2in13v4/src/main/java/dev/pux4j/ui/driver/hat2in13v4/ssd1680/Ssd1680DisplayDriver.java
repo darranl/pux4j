@@ -76,7 +76,6 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
     private final DigitalOutput dc;
     private final DigitalOutput rst;
     private final DigitalInput  busy;
-    private boolean partialModeConfigured;
     private final byte[] lastFrameBytes = new byte[FRAME_BYTES];
 
     private int  partialRefreshCount  = 0;
@@ -218,9 +217,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         }
 
         return CompletableFuture.runAsync(() -> {
-            if (!partialModeConfigured) {
-                configurePartialRefreshMode();
-            }
+            configurePartialRefreshMode();
 
             waitBusy();
             setWindow(x, y, x + width - 1, y + height - 1);
@@ -263,7 +260,6 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         sendData((byte) 0x80);
         waitBusy();
 
-        partialModeConfigured = false;
     }
 
     private void configureFastRefreshMode() {
@@ -294,7 +290,6 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         sendCommand(CMD_ACTIVATE);
         waitBusy();
 
-        partialModeConfigured = false;
     }
 
     private void configurePartialRefreshMode() {
@@ -316,7 +311,6 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         setWindow(0, 0, WIDTH - 1, HEIGHT - 1);
         setCursor(0, 0);
 
-        partialModeConfigured = true;
     }
 
     private CompletableFuture<Void> writeFullFrame(byte[] data) {
@@ -384,9 +378,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         }
 
         return CompletableFuture.runAsync(() -> {
-            if (!partialModeConfigured) {
-                configurePartialRefreshMode();
-            }
+            configurePartialRefreshMode();
 
             waitBusy();
 

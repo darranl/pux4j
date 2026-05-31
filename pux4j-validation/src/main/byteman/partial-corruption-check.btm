@@ -1,0 +1,36 @@
+# ByteMan rules to detect array corruption across SSD1680 sendData calls.
+#
+# Targets the SSD1680 driver's sendData(byte[]) method specifically for
+# full-frame writes (FRAME_BYTES == 4000). Logs the identity hash, first 8 bytes,
+# and last 8 bytes of the array at ENTRY and EXIT.
+#
+# If the first/last bytes differ between ENTRY and EXIT, Pi4J's spi.transfer is
+# modifying the caller's array — which would explain lastFrameBytes corruption.
+#
+# Each line is prefixed [CORRUPT] for easy filtering:
+#   grep '\[CORRUPT\]' <logfile>
+#
+# Usage: loaded via --enable-byteman on the run-smoke-test.sh script.
+# Only rules matching loaded classes will fire — unused rules are silently ignored.
+
+RULE ssd1680 sendData full-frame corruption entry
+CLASS dev.pux4j.ui.driver.hat2in13v4.ssd1680.Ssd1680DisplayDriver
+METHOD sendData(byte[])
+AT ENTRY
+IF $1.length == 4000
+DO traceln("[CORRUPT] sendData ENTRY  thread=" + Thread.currentThread().getName()
+           + " id=" + java.lang.System.identityHashCode($1)
+           + " first8=" + java.util.HexFormat.of().formatHex($1, 0, 8)
+           + " last8="  + java.util.HexFormat.of().formatHex($1, 3992, 4000))
+ENDRULE
+
+RULE ssd1680 sendData full-frame corruption exit
+CLASS dev.pux4j.ui.driver.hat2in13v4.ssd1680.Ssd1680DisplayDriver
+METHOD sendData(byte[])
+AT EXIT
+IF $1.length == 4000
+DO traceln("[CORRUPT] sendData EXIT   thread=" + Thread.currentThread().getName()
+           + " id=" + java.lang.System.identityHashCode($1)
+           + " first8=" + java.util.HexFormat.of().formatHex($1, 0, 8)
+           + " last8="  + java.util.HexFormat.of().formatHex($1, 3992, 4000))
+ENDRULE
