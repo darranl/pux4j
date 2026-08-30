@@ -12,7 +12,9 @@ import javafx.stage.Stage;
  *
  * <p>Usage — from {@code Application.start(Stage)}:
  * <pre>{@code
- * var display = new EmulatedEInkDisplay(296, 128, Orientation.LANDSCAPE,
+ * // Native (portrait-shaped) dimensions, not the panel's marketed landscape resolution —
+ * // see EmulatedEInkDisplay's native/screen dimension split.
+ * var display = new EmulatedEInkDisplay(128, 296, Orientation.LANDSCAPE,
  *     EnumSet.of(PixelFormat.MONOCHROME), EnumSet.of(RefreshMode.FULL));
  * var touch = new EmulatedTouchDriver();
  * var window = EInkEmulatorWindow.create("SSD1675A (2.9\" V2)", display, touch, primaryStage);
@@ -43,8 +45,8 @@ public final class EInkEmulatorWindow {
                                              EmulatedTouchDriver touch,
                                              Stage stage) {
         int sf = display.scaleFactor();
-        int canvasW = display.getWidth()  * sf;
-        int canvasH = display.getHeight() * sf;
+        int canvasW = display.screenWidth()  * sf;
+        int canvasH = display.screenHeight() * sf;
 
         Canvas canvas = new Canvas(canvasW, canvasH);
 
@@ -63,7 +65,7 @@ public final class EInkEmulatorWindow {
         var scene = new Scene(root, canvasW, canvasH, Color.WHITE);
         stage.setScene(scene);
         stage.setTitle("pux4j Emulator — " + displayName
-                        + " (" + display.getWidth() + "×" + display.getHeight() + ")"
+                        + " (" + display.screenWidth() + "×" + display.screenHeight() + ")"
                         + " @ " + sf + "×");
         stage.setResizable(false);
 
@@ -76,7 +78,7 @@ public final class EInkEmulatorWindow {
     public static EInkEmulatorWindow create(EmulatedEInkDisplay display,
                                              EmulatedTouchDriver touch,
                                              Stage stage) {
-        return create(display.getWidth() + "×" + display.getHeight(), display, touch, stage);
+        return create(display.screenWidth() + "×" + display.screenHeight(), display, touch, stage);
     }
 
     /** Shows the emulator window. Must be called on the JavaFX Application Thread. */

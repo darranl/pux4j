@@ -9,6 +9,7 @@ import com.pi4j.io.gpio.digital.DigitalState;
 import com.pi4j.io.gpio.digital.PullResistance;
 import com.pi4j.io.i2c.I2C;
 import dev.pux4j.ui.core.DriverConfig;
+import dev.pux4j.ui.core.GpioChipResolver;
 import dev.pux4j.ui.core.TouchDriver;
 import dev.pux4j.ui.core.TouchPoint;
 import org.slf4j.Logger;
@@ -40,6 +41,7 @@ final class Icnt86xTouchDriver implements TouchDriver {
         int busAddr  = config.property("touchI2cAddress", 0x48);
         int trstPin  = config.property("touchRstPin",     22);
         int intPin   = config.property("touchIntPin",     27);
+        int gpioChip = GpioChipResolver.resolveHeaderChip(config);
 
         i2c = ctx.create(I2C.newConfigBuilder(ctx)
             .id("icnt86x-i2c")
@@ -51,6 +53,7 @@ final class Icnt86xTouchDriver implements TouchDriver {
         touchRst = ctx.create(DigitalOutput.newConfigBuilder(ctx)
             .id("icnt86x-trst")
             .name("ICNT86X TRST")
+            .bus(gpioChip)
             .bcm(trstPin)
             .initial(DigitalState.HIGH)
             .shutdown(DigitalState.HIGH)
@@ -59,6 +62,7 @@ final class Icnt86xTouchDriver implements TouchDriver {
         touchInt = ctx.create(DigitalInput.newConfigBuilder(ctx)
             .id("icnt86x-int")
             .name("ICNT86X INT")
+            .bus(gpioChip)
             .bcm(intPin)
             .pull(PullResistance.PULL_UP)
             .build());

@@ -9,6 +9,7 @@ import com.pi4j.io.gpio.digital.DigitalState;
 import com.pi4j.io.gpio.digital.PullResistance;
 import com.pi4j.io.i2c.I2C;
 import dev.pux4j.ui.core.DriverConfig;
+import dev.pux4j.ui.core.GpioChipResolver;
 import dev.pux4j.ui.core.TouchDriver;
 import dev.pux4j.ui.core.TouchPoint;
 import org.slf4j.Logger;
@@ -41,6 +42,7 @@ final class Gt1151qTouchDriver implements TouchDriver {
         int busAddr  = config.property("touchI2cAddress", 0x14);
         int trstPin  = config.property("touchRstPin",     22);
         int intPin   = config.property("touchIntPin",     27);
+        int gpioChip = GpioChipResolver.resolveHeaderChip(config);
 
         i2c = ctx.create(I2C.newConfigBuilder(ctx)
             .id("gt1151q-i2c")
@@ -52,6 +54,7 @@ final class Gt1151qTouchDriver implements TouchDriver {
         touchRst = ctx.create(DigitalOutput.newConfigBuilder(ctx)
             .id("gt1151q-trst")
             .name("GT1151Q TRST")
+            .bus(gpioChip)
             .bcm(trstPin)
             .initial(DigitalState.HIGH)
             .shutdown(DigitalState.HIGH)
@@ -60,6 +63,7 @@ final class Gt1151qTouchDriver implements TouchDriver {
         touchInt = ctx.create(DigitalInput.newConfigBuilder(ctx)
             .id("gt1151q-int")
             .name("GT1151Q INT")
+            .bus(gpioChip)
             .bcm(intPin)
             .pull(PullResistance.PULL_UP)
             .build());

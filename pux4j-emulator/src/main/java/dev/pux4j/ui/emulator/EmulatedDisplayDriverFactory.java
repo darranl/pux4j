@@ -4,7 +4,6 @@ package dev.pux4j.ui.emulator;
 import dev.pux4j.ui.core.DisplayDriverFactory;
 import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.EInkDisplayDriver;
-import dev.pux4j.ui.core.Orientation;
 import dev.pux4j.ui.core.Pux4jContext;
 import javafx.application.Platform;
 import javafx.stage.Stage;
@@ -55,7 +54,7 @@ public final class EmulatedDisplayDriverFactory implements DisplayDriverFactory 
         log.debug("Creating emulated display: profile={} scale={}", profile.profileName, scale);
 
         var display = new EmulatedEInkDisplay(
-            profile.width, profile.height, Orientation.LANDSCAPE,
+            profile.nativeWidth(), profile.nativeHeight(), profile.orientation,
             profile.formats, profile.modes, scale);
         var touch = new EmulatedTouchDriver();
 

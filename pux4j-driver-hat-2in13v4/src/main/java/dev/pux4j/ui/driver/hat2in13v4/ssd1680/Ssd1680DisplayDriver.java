@@ -15,6 +15,7 @@ import dev.pux4j.ui.core.DisplayCapabilities;
 import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.EInkDisplayDriver;
 import dev.pux4j.ui.core.FrameData;
+import dev.pux4j.ui.core.GpioChipResolver;
 import dev.pux4j.ui.core.MonochromeFrame;
 import dev.pux4j.ui.core.Orientation;
 import dev.pux4j.ui.core.PixelFormat;
@@ -91,6 +92,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         int dcPin   = config.property("dcPin",   25);
         int rstPin  = config.property("rstPin",  17);
         int busyPin = config.property("busyPin", 24);
+        int gpioChip = GpioChipResolver.resolveHeaderChip(config);
 
         spi = ctx.create(Spi.newConfigBuilder(ctx)
             .id("ssd1680-spi")
@@ -104,6 +106,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         dc = ctx.create(DigitalOutput.newConfigBuilder(ctx)
             .id("ssd1680-dc")
             .name("SSD1680 DC")
+            .bus(gpioChip)
             .bcm(dcPin)
             .initial(DigitalState.LOW)
             .shutdown(DigitalState.LOW)
@@ -112,6 +115,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         rst = ctx.create(DigitalOutput.newConfigBuilder(ctx)
             .id("ssd1680-rst")
             .name("SSD1680 RST")
+            .bus(gpioChip)
             .bcm(rstPin)
             .initial(DigitalState.HIGH)
             .shutdown(DigitalState.HIGH)
@@ -120,6 +124,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         busy = ctx.create(DigitalInput.newConfigBuilder(ctx)
             .id("ssd1680-busy")
             .name("SSD1680 BUSY")
+            .bus(gpioChip)
             .bcm(busyPin)
             .pull(PullResistance.PULL_DOWN)
             .build());

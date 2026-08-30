@@ -310,12 +310,20 @@ final class Canvas {
         }
     }
 
+    // The native framebuffer (fbW x fbH) is always portrait-shaped (narrow x tall — see
+    // Ssd1680DisplayDriver.WIDTH/HEIGHT). PORTRAIT is therefore the identity mapping;
+    // LANDSCAPE/LANDSCAPE_INVERTED require a proper 90-degree rotation (axis swap + exactly
+    // one flip — NOT a mirror/transpose, which is axis swap + zero or two flips and has the
+    // wrong handedness for a physical screen rotation). Direction empirically confirmed on
+    // LittleRaspberry (hat-2in13v4, LANDSCAPE_INVERTED) 2026-08-30: an earlier transpose-based
+    // attempt ({ly, lx} / {fbW-1-ly, fbH-1-lx}, determinant -1) rendered correct aspect ratio
+    // and right-way-up but mirrored left-right.
     private int[] mapToFramebuffer(int lx, int ly) {
         return switch (orientation) {
-            case LANDSCAPE         -> new int[]{lx, ly};
-            case LANDSCAPE_INVERTED -> new int[]{fbW - 1 - lx, fbH - 1 - ly};
-            case PORTRAIT          -> new int[]{ly, fbH - 1 - lx};
-            case PORTRAIT_INVERTED -> new int[]{fbW - 1 - ly, lx};
+            case LANDSCAPE          -> new int[]{ly, fbH - 1 - lx};
+            case LANDSCAPE_INVERTED -> new int[]{fbW - 1 - ly, lx};
+            case PORTRAIT           -> new int[]{lx, ly};
+            case PORTRAIT_INVERTED  -> new int[]{fbW - 1 - lx, fbH - 1 - ly};
         };
     }
 }

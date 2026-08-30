@@ -307,17 +307,22 @@ public final class HardwareValidationTest {
             .build();
     }
 
+    // The SSD1680/SSD1675A native framebuffer is always narrow x tall (portrait-shaped —
+    // e.g. 122x250 on hat-2in13v4, 128x296 on hat-2in9v2); the physical panel is landscape.
+    // So LANDSCAPE/LANDSCAPE_INVERTED must swap the native dimensions; PORTRAIT/PORTRAIT_INVERTED
+    // use them as-is. (Confirmed against Ssd1680DisplayDriver.WIDTH/HEIGHT and
+    // DisplaySmokeTest's independently-verified "landscape view: 250px wide x 122px tall".)
     private static int logicalWidth(Orientation orientation, int framebufferWidth, int framebufferHeight) {
         return switch (orientation) {
-            case LANDSCAPE, LANDSCAPE_INVERTED -> framebufferWidth;
-            case PORTRAIT, PORTRAIT_INVERTED   -> framebufferHeight;
+            case LANDSCAPE, LANDSCAPE_INVERTED -> framebufferHeight;
+            case PORTRAIT, PORTRAIT_INVERTED   -> framebufferWidth;
         };
     }
 
     private static int logicalHeight(Orientation orientation, int framebufferWidth, int framebufferHeight) {
         return switch (orientation) {
-            case LANDSCAPE, LANDSCAPE_INVERTED -> framebufferHeight;
-            case PORTRAIT, PORTRAIT_INVERTED   -> framebufferWidth;
+            case LANDSCAPE, LANDSCAPE_INVERTED -> framebufferWidth;
+            case PORTRAIT, PORTRAIT_INVERTED   -> framebufferHeight;
         };
     }
 
