@@ -50,7 +50,36 @@
             <artifactId>parsson</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- Emulator: runtime scope so it lands in target/run-lib automatically.
+             Excluded from hardware distribution assemblies (see dist.xml). -->
+        <dependency>
+            <groupId>dev.pux4j.ui</groupId>
+            <artifactId>pux4j-emulator</artifactId>
+            <version>${project.version}</version>
+            <scope>runtime</scope>
+        </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-dependency-plugin</artifactId>
+                <version>3.7.0</version>
+                <executions>
+                    <execution>
+                        <id>copy-runtime-deps</id>
+                        <phase>package</phase>
+                        <goals><goal>copy-dependencies</goal></goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/run-lib</outputDirectory>
+                            <includeScope>runtime</includeScope>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
 
     <profiles>
         <profile>

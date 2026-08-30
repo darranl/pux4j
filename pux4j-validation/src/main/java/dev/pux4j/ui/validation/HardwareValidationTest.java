@@ -30,7 +30,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.ServiceLoader;
 import java.util.concurrent.CompletableFuture;
 
 import static dev.pux4j.ui.validation.ValidationMessages.format;
@@ -67,8 +66,20 @@ public final class HardwareValidationTest {
         ReportWriter reportWriter = null;
 
         try {
-            DisplayDriverFactory displayFactory = findFactory(DisplayDriverFactory.class, options.displayDriver, "DisplayDriverFactory");
-            TouchDriverFactory touchFactory = findFactory(TouchDriverFactory.class, options.touchDriver, "TouchDriverFactory");
+            DisplayDriverFactory displayFactory = ServiceLoaderUtil.selectProvider(
+                DisplayDriverFactory.class,
+                DisplayDriverFactory::name,
+                DisplayDriverFactory::priority,
+                DisplayDriverFactory::isAvailable,
+                options.displayDriver,
+                "display driver factory");
+            TouchDriverFactory touchFactory = ServiceLoaderUtil.selectProvider(
+                TouchDriverFactory.class,
+                TouchDriverFactory::name,
+                TouchDriverFactory::priority,
+                TouchDriverFactory::isAvailable,
+                options.touchDriver,
+                "touch driver factory");
 
             String resolvedDisplay = displayFactory.name();
             String resolvedTouch = touchFactory.name();
@@ -296,53 +307,17 @@ public final class HardwareValidationTest {
             .build();
     }
 
-    private static <T> T findFactory(Class<T> type, String name, String label) {
-        var all = ServiceLoader.load(type)
-            .stream()
-            .map(ServiceLoader.Provider::get)
-            .toList();
-        if (name != null) {
-            return all.stream()
-                .filter(instance -> instanceName(instance).equals(name))
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException(format(
-                    "cli.error.noNamedProvider",
-                    label,
-                    name,
-                    all.stream().map(HardwareValidationTest::instanceName).toList())));
-        }
-        // Auto-select: for DisplayDriverFactory filter out the headless "png" stub.
-        // In a native binary only one hardware driver module is compiled in.
-        var candidates = (type == DisplayDriverFactory.class)
-            ? all.stream().filter(i -> !instanceName(i).equals("png")).toList()
-            : all;
-        if (candidates.size() == 1) {
-            return candidates.get(0);
-        }
-        throw new IllegalStateException(format(
-            "cli.error.providerCount",
-            label,
-            candidates.size(),
-            candidates.stream().map(HardwareValidationTest::instanceName).toList()));
-    }
-
-    private static String instanceName(Object instance) {
-        if (instance instanceof DisplayDriverFactory f) return f.name();
-        if (instance instanceof TouchDriverFactory f) return f.name();
-        return instance.getClass().getSimpleName();
-    }
-
     private static int logicalWidth(Orientation orientation, int framebufferWidth, int framebufferHeight) {
         return switch (orientation) {
-            case PORTRAIT, PORTRAIT_INVERTED -> framebufferWidth;
-            case LANDSCAPE, LANDSCAPE_INVERTED -> framebufferHeight;
+            case LANDSCAPE, LANDSCAPE_INVERTED -> framebufferWidth;
+            case PORTRAIT, PORTRAIT_INVERTED   -> framebufferHeight;
         };
     }
 
     private static int logicalHeight(Orientation orientation, int framebufferWidth, int framebufferHeight) {
         return switch (orientation) {
-            case PORTRAIT, PORTRAIT_INVERTED -> framebufferHeight;
-            case LANDSCAPE, LANDSCAPE_INVERTED -> framebufferWidth;
+            case LANDSCAPE, LANDSCAPE_INVERTED -> framebufferHeight;
+            case PORTRAIT, PORTRAIT_INVERTED   -> framebufferWidth;
         };
     }
 

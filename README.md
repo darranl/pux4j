@@ -22,15 +22,25 @@ application code.
 - Pi OS 12 (Debian bookworm), aarch64
 - Java 25 or GraalVM CE 25 installed (via sdkman: `sdk install java 25.0.2-tem`)
 
-### Two operating modes
+### Three operating modes
 
-**Mode A — Build and run directly on Pi:**
+**Mode A — Emulator on a laptop (no hardware required):**
+```bash
+cd pux4j-ui
+./pux4j-validation/run-smoke-emulator.sh          # smoke test in JavaFX window
+./pux4j-validation/run-validation-emulator.sh     # interactive validation (mouse = touch)
+./pux4j-demo/run-demo.sh                          # JavaFX counter demo
+```
+The emulator is auto-selected on any machine that is not a Raspberry Pi.
+Display profile and scale are set with `--display=ssd1675a` and `--scale=3`.
+
+**Mode B — Build and run directly on Pi:**
 ```bash
 mvn package -P dist-hat-2in9v2    # or dist-hat-2in13v4
 ```
-Then run via the generated distribution scripts.
+Then run via the generated distribution scripts (see below).
 
-**Mode B — Build on a laptop, deploy to Pi:**
+**Mode C — Build on a laptop, deploy to Pi:**
 ```bash
 mvn package -P dist-hat-2in9v2
 # Copy pux4j-validation/target/pux4j-validation-hat-2in9v2.zip to Pi
@@ -47,8 +57,9 @@ bin/run-demo.sh                    # JavaFX counter demo (JVM only)
 
 ### Expected results
 
-- **Smoke test**: completes 7 refresh steps and exits; logs show "Step N/7 complete". Any hardware issue will cause an exception.
+- **Smoke test**: completes 7 refresh steps and exits; logs show each step complete. Any hardware issue causes an exception.
 - **Hardware validation**: interactive 10-step test prompting you to tap screen targets; writes a pass/fail report to the working directory on exit.
+- **Emulator**: a JavaFX window opens showing the emulated eInk panel; mouse clicks are translated to touch events.
 
 ### Build and review Javadoc
 
@@ -186,14 +197,15 @@ Both run Pi OS 12 (Debian bookworm, aarch64).
 | Phase | Description | Status |
 |---|---|---|
 | 0 | Maven skeleton — all modules compile, JPMS wired | Complete |
-| 1 | JavaFX demo + GraalVM native image verification | In progress |
-| 2 | Hardware drivers — SSD1675A, SSD1680, ICNT86X, GT1151Q | Pending |
-| 3 | Emulation framework | Pending |
-| 4 | GraalVM AOT verification with hardware drivers | Pending |
-| 5 | JavaFX bridge + full demo app integration | Pending |
-| 6 | CI and GitHub Actions | Pending |
-| 7 | Native shared library (C API) | Pending |
-| 8 | Native language demo applications | Pending |
+| 1 | Hardware drivers — SSD1675A, SSD1680, ICNT86X, GT1151Q; validation test | Complete |
+| 2 | JavaFX demo apps (JVM) | Complete |
+| 3 | GraalVM native image — JavaFX demos on x86_64 and aarch64 | Complete |
+| 4 | Emulation framework — JavaFX emulator + headless test doubles | Complete |
+| 5 | GraalVM AOT verification with hardware drivers | Pending |
+| 6 | JavaFX bridge + full demo app integration | Pending |
+| 7 | CI and GitHub Actions | Pending |
+| 8 | Native shared library (C API) | Pending |
+| 9 | Native language demo applications | Pending |
 
 ---
 

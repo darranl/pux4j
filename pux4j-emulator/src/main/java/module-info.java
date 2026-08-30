@@ -6,4 +6,9 @@ module dev.pux4j.ui.emulator {
     requires org.slf4j;
 
     exports dev.pux4j.ui.emulator;
+
+    provides dev.pux4j.ui.core.DisplayDriverFactory
+        with dev.pux4j.ui.emulator.EmulatedDisplayDriverFactory;
+    provides dev.pux4j.ui.core.TouchDriverFactory
+        with dev.pux4j.ui.emulator.EmulatedTouchDriverFactory;
 }

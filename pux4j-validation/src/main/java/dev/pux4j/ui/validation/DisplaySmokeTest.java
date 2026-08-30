@@ -355,8 +355,9 @@ public final class DisplaySmokeTest {
         return ServiceLoaderUtil.selectProvider(
                 DisplayDriverFactory.class,
                 DisplayDriverFactory::name,
+                DisplayDriverFactory::priority,
+                DisplayDriverFactory::isAvailable,
                 name,
-                f -> f.name().equals("png"),  // exclude headless PNG driver from auto-selection
                 "display driver factory");
     }
 }

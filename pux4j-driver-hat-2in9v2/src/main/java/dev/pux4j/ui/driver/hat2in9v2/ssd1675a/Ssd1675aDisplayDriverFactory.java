@@ -6,10 +6,25 @@ import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.EInkDisplayDriver;
 import dev.pux4j.ui.core.Pux4jContext;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
+
 public final class Ssd1675aDisplayDriverFactory implements DisplayDriverFactory {
 
     @Override
     public String name() { return "ssd1675a"; }
+
+    @Override
+    public int priority() { return 100; }
+
+    @Override
+    public boolean isAvailable() {
+        try {
+            return Files.readString(Path.of("/proc/device-tree/model")).startsWith("Raspberry Pi");
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     @Override
     public EInkDisplayDriver create(Pux4jContext context, DriverConfig config) {

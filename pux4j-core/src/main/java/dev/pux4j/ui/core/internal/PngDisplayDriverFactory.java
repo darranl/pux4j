@@ -14,11 +14,15 @@ public final class PngDisplayDriverFactory implements DisplayDriverFactory {
     @Override
     public String name() { return NAME; }
 
+    /** PNG driver is never auto-selected; use {@code --driver=png} to select it explicitly. */
+    @Override
+    public boolean isAvailable() { return false; }
+
     @Override
     public EInkDisplayDriver create(Pux4jContext context, DriverConfig config) {
         int width       = config.property("width",  128);
         int height      = config.property("height", 296);
-        Orientation orientation = Orientation.valueOf(config.property("orientation", "PORTRAIT"));
+        Orientation orientation = Orientation.valueOf(config.property("orientation", "LANDSCAPE"));
         String outputDir = config.property("outputDir", "target/png-frames");
         return new PngEInkDisplay(width, height, orientation, outputDir);
     }

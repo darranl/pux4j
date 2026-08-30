@@ -2,17 +2,22 @@
 package dev.pux4j.ui.core;
 
 /**
- * Physical orientation of the display panel relative to its native portrait layout.
- * The driver reports its configured orientation via {@link EInkDisplayDriver#getOrientation()},
- * and logical width/height swap accordingly when landscape modes are used.
+ * Physical viewing orientation of the display panel.
+ *
+ * <p>LANDSCAPE and LANDSCAPE_INVERTED produce a logical canvas that is wider than tall
+ * (width &gt; height). PORTRAIT and PORTRAIT_INVERTED produce a canvas that is taller
+ * than wide (height &gt; width).
+ *
+ * <p>The driver reports its configured orientation via
+ * {@link EInkDisplayDriver#getOrientation()}.
  */
 public enum Orientation {
-    /** Native portrait orientation — no rotation applied. */
-    PORTRAIT,
-    /** 90° clockwise from portrait. */
+    /** Display viewed in landscape — wider than tall. No content rotation required. */
     LANDSCAPE,
-    /** 180° from portrait. */
-    PORTRAIT_INVERTED,
-    /** 270° clockwise from portrait. */
-    LANDSCAPE_INVERTED
+    /** Display viewed in landscape, physically mounted upside-down (180° rotation). */
+    LANDSCAPE_INVERTED,
+    /** Display viewed in portrait — taller than wide. Content is rotated 90° CW. */
+    PORTRAIT,
+    /** Display viewed in portrait, physically mounted upside-down (270° CW rotation). */
+    PORTRAIT_INVERTED
 }

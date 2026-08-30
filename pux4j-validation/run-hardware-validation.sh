@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Run the interactive hardware validation test.
-# Defaults to the Pi 500+ 2.9" V2 profile; no extra flags required.
+# Build first: cd pux4j-ui && mvn -pl pux4j-validation -am -DskipTests package
 set -euo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
@@ -15,7 +15,7 @@ Usage:
 
 Profiles:
   pi500-2in9        Pi 500+ with WaveShare 2.9" V2 HAT (default)
-  little-2in13      LittleRaspberry / 2.13" V4 target (driver preset only)
+  little-2in13      LittleRaspberry / 2.13" V4 HAT
   custom            No preset arguments; pass everything via --
 
 Examples:
@@ -28,13 +28,9 @@ Examples:
 
 Environment:
   VALIDATION_PROFILE   Default profile when not passed on CLI (default: pi500-2in9)
-  SKIP_PREPARE=1       Skip auto-build/dependency prepare checks
-  FORCE_PREPARE=1      Force rebuild and dependency refresh before run
 
-Notes:
-  - The script auto-builds pux4j-validation and refreshes runtime dependencies when artifacts are missing or stale.
-  - HardwareValidationTest defaults to 2 scenarios for stabilization.
-  - Extra arguments after '--' are passed directly to HardwareValidationTest.
+Build first:
+  cd pux4j-ui && mvn -pl pux4j-validation -am -DskipTests package
 EOF
 }
 
@@ -74,7 +70,7 @@ case "$PROFILE" in
     PROFILE_ARGS=(
       --display ssd1680
       --touch gt1151q
-      --orientation PORTRAIT
+      --orientation LANDSCAPE_INVERTED
     )
     ;;
   custom)
@@ -87,42 +83,16 @@ case "$PROFILE" in
     ;;
 esac
 
-prepare_if_needed() {
-  if [[ ${SKIP_PREPARE:-0} == "1" ]]; then
-    return
+require_artifacts() {
+  local ok=1
+  if [[ ! -f "$VALIDATION_JAR" || ! -d "$LIB_DIR" ]]; then
+    echo "ERROR: Build artifacts not found."
+    echo "       Run: cd pux4j-ui && mvn -pl pux4j-validation -am -DskipTests package"
+    ok=0
   fi
-
-  local should_prepare=0
-  if [[ ${FORCE_PREPARE:-0} == "1" ]]; then
-    should_prepare=1
-  elif [[ ! -f "$VALIDATION_JAR" || ! -d "$LIB_DIR" ]]; then
-    should_prepare=1
-  elif find "$SCRIPT_DIR/src/main" -type f -newer "$VALIDATION_JAR" | grep -q .; then
-    should_prepare=1
-  elif [[ "$SCRIPT_DIR/pom.xml" -nt "$VALIDATION_JAR" || "$PROJECT_ROOT/pom.xml" -nt "$VALIDATION_JAR" ]]; then
-    should_prepare=1
-  fi
-
-  if [[ $should_prepare -eq 1 ]]; then
-    echo "Preparing validation runtime artifacts..."
-    (
-      cd "$PROJECT_ROOT"
-      mvn -pl pux4j-validation -am -DskipTests package
-      mvn -pl pux4j-validation -DincludeScope=runtime dependency:copy-dependencies -DoutputDirectory=target/run-lib
-    )
-  fi
+  [[ $ok -eq 1 ]]
 }
-
-prepare_if_needed
-
-if [ ! -f "$VALIDATION_JAR" ]; then
-  echo "ERROR: $VALIDATION_JAR not found — run 'mvn package -DskipTests' first"
-  exit 1
-fi
-if [ ! -d "$LIB_DIR" ]; then
-  echo "ERROR: $LIB_DIR not found — run 'mvn dependency:copy-dependencies -pl pux4j-validation -DincludeScope=runtime -DoutputDirectory=target/run-lib'"
-  exit 1
-fi
+require_artifacts || exit 1
 
 MODULE_PATH="$VALIDATION_JAR:$(ls "$LIB_DIR"/*.jar | tr '\n' ':')"
 

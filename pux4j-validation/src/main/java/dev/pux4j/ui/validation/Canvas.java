@@ -312,10 +312,10 @@ final class Canvas {
 
     private int[] mapToFramebuffer(int lx, int ly) {
         return switch (orientation) {
-            case PORTRAIT -> new int[]{lx, ly};
-            case LANDSCAPE -> new int[]{ly, fbH - 1 - lx};
-            case PORTRAIT_INVERTED -> new int[]{fbW - 1 - lx, fbH - 1 - ly};
-            case LANDSCAPE_INVERTED -> new int[]{fbW - 1 - ly, lx};
+            case LANDSCAPE         -> new int[]{lx, ly};
+            case LANDSCAPE_INVERTED -> new int[]{fbW - 1 - lx, fbH - 1 - ly};
+            case PORTRAIT          -> new int[]{ly, fbH - 1 - lx};
+            case PORTRAIT_INVERTED -> new int[]{fbW - 1 - ly, lx};
         };
     }
 }

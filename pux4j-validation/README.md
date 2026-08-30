@@ -11,6 +11,38 @@ Both tools run via JPMS and ServiceLoader driver factories from pux4j-core.
 
 Icon attribution and previews are documented in [src/main/resources/icons/ATTRIBUTION.md](src/main/resources/icons/ATTRIBUTION.md).
 
+## Modes
+
+### Hardware mode (on a Raspberry Pi)
+
+Run against a physically attached WaveShare eInk HAT. Requires SPI and I2C enabled.
+
+### Emulator mode (laptop, no hardware)
+
+Run against the JavaFX visual emulator. Mouse press = touch down, mouse release = touch up.
+Auto-selects the emulator driver on any machine that is not a Raspberry Pi.
+
+```bash
+# Smoke test against emulator (SSD1675A profile, 3× scale)
+./pux4j-validation/run-smoke-emulator.sh
+
+# Smoke test with 2.13" V4 profile
+./pux4j-validation/run-smoke-emulator.sh --display=ssd1680
+
+# Interactive validation against emulator
+./pux4j-validation/run-validation-emulator.sh
+
+# Validation with larger scale factor
+./pux4j-validation/run-validation-emulator.sh --scale=4
+
+# Jump to a specific step (e.g. step 3)
+./pux4j-validation/run-validation-emulator.sh --start-step 3
+```
+
+Display profiles: `ssd1675a` (296×128, 2.9" V2, default) and `ssd1680` (250×122, 2.13" V4).
+
+---
+
 ## Available tests
 
 ### 1) DisplaySmokeTest

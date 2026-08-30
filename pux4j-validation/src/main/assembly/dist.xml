@@ -8,13 +8,18 @@
   </formats>
   <includeBaseDirectory>false</includeBaseDirectory>
 
-  <!-- All runtime JARs (transitive deps + own artifact) go into lib/ -->
+  <!-- All runtime JARs (transitive deps + own artifact) go into lib/,
+       excluding the emulator and JavaFX which are laptop-only. -->
   <dependencySets>
     <dependencySet>
       <outputDirectory>${dist.name}/lib</outputDirectory>
       <scope>runtime</scope>
       <useProjectArtifact>true</useProjectArtifact>
       <fileMode>0644</fileMode>
+      <excludes>
+        <exclude>dev.pux4j.ui:pux4j-emulator</exclude>
+        <exclude>org.openjfx:*</exclude>
+      </excludes>
     </dependencySet>
   </dependencySets>
 
