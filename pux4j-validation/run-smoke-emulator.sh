@@ -51,4 +51,5 @@ java \
   -Dpux4j.emulator.scale="$SCALE" \
   --module-path "$MODULE_PATH" \
   --add-modules dev.pux4j.ui.emulator \
+  --enable-native-access=javafx.graphics,com.pi4j.plugin.ffm \
   -m dev.pux4j.ui.validation/dev.pux4j.ui.validation.DisplaySmokeTest
