@@ -20,7 +20,7 @@ application code.
 - Raspberry Pi (any model with GPIO; tested on Pi 500+, Pi Zero 2 W)
 - WaveShare Touch e-Paper HAT (2.13" V4 or 2.9" V2)
 - Pi OS 12 (Debian bookworm), aarch64
-- Java 25 or GraalVM CE 25 installed (via sdkman: `sdk install java 25.0.2-tem`)
+- Java 25 or GraalVM CE 25 installed (via sdkman: `sdk install java 25.0.4-tem`)
 
 ### Three operating modes
 
