@@ -36,8 +36,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Native touch dimensions must match the display dimensions so TouchCoordinateMapper
-# acts as identity (emulator already returns display-logical coordinates).
 # ORIENTATION must match each profile's real hardware orientation exactly (see
 # dist-hat-2in9v2/dist-hat-2in13v4 in pux4j-validation/pom.xml) — Canvas builds content in
 # this orientation's coordinate space, and EmulatorDisplayProfile (pux4j-emulator) renders
@@ -45,9 +43,13 @@ done
 # 180 degrees from correct (found 2026-08-30 checking the ssd1680 profile specifically:
 # HardwareValidationTest's own '--orientation' default of LANDSCAPE was always used here,
 # never overridden per profile).
+# Touch calibration is no longer passed here at all — EmulatedTouchDriverFactory reports its
+# own identity calibration matching whichever display is selected (see TouchDriverFactory
+# .touchCalibration in pux4j-core), so there is nothing left for this script to get out of
+# sync with the display profile.
 case "$DISPLAY_PROFILE" in
-  ssd1675a) TOUCH_NATIVE_W=296; TOUCH_NATIVE_H=128; ORIENTATION="LANDSCAPE" ;;
-  ssd1680)  TOUCH_NATIVE_W=250; TOUCH_NATIVE_H=122; ORIENTATION="LANDSCAPE_INVERTED" ;;
+  ssd1675a) ORIENTATION="LANDSCAPE" ;;
+  ssd1680)  ORIENTATION="LANDSCAPE_INVERTED" ;;
   *)
     echo "ERROR: Unknown display profile '$DISPLAY_PROFILE'. Valid: ssd1675a, ssd1680"
     exit 1
@@ -75,6 +77,4 @@ java \
   --enable-native-access=javafx.graphics,com.pi4j.plugin.ffm \
   -m dev.pux4j.ui.validation/dev.pux4j.ui.validation.HardwareValidationTest \
   --orientation "$ORIENTATION" \
-  --touch-native-width "$TOUCH_NATIVE_W" \
-  --touch-native-height "$TOUCH_NATIVE_H" \
   "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"

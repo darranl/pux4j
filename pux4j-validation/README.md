@@ -97,14 +97,17 @@ Profiles:
   - display=ssd1675a
   - touch=icnt86x
   - orientation=LANDSCAPE
-  - touch-native-width=296
-  - touch-native-height=128
 - little-2in13:
   - display=ssd1680
   - touch=gt1151q
-  - orientation=PORTRAIT
+  - orientation=LANDSCAPE_INVERTED
 - custom:
   - no preset arguments (you pass everything)
+
+Touch calibration (native resolution, axis flips/swap) is not a run argument at all — each
+touch driver reports its own fixed calibration for the panel it's bonded to (see
+`TouchDriverFactory.touchCalibration` in `pux4j-core`), so there is nothing to pass or get
+out of sync here.
 
 Examples:
 ```bash
@@ -131,10 +134,7 @@ Examples:
 ./pux4j-validation/run-hardware-validation.sh custom -- \
   --display ssd1675a \
   --touch icnt86x \
-  --orientation LANDSCAPE \
-  --touch-native-width 296 \
-  --touch-native-height 128 \
-  --flip-x
+  --orientation LANDSCAPE
 ```
 
 Show script help:

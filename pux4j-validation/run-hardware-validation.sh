@@ -60,10 +60,6 @@ case "$PROFILE" in
       --display ssd1675a
       --touch icnt86x
       --orientation LANDSCAPE
-      --touch-native-width 296
-      --touch-native-height 128
-      --flip-x
-      --flip-y
     )
     ;;
   little-2in13)
