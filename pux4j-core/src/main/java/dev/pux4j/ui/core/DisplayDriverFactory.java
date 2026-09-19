@@ -34,6 +34,24 @@ public interface DisplayDriverFactory {
     default boolean isAvailable() { return true; }
 
     /**
+     * Selects a factory by name, or — when {@code requestedName} is null — the
+     * highest-priority factory reporting {@link #isAvailable()}.
+     *
+     * @param requestedName the name to select, or {@code null} to auto-select
+     * @return the selected factory
+     * @throws IllegalStateException if no match is found, listing what was seen
+     */
+    static DisplayDriverFactory select(String requestedName) {
+        return ServiceLoaderUtil.selectProvider(
+                DisplayDriverFactory.class,
+                DisplayDriverFactory::name,
+                DisplayDriverFactory::priority,
+                DisplayDriverFactory::isAvailable,
+                requestedName,
+                "display driver factory");
+    }
+
+    /**
      * Creates a new, uninitialised {@link EInkDisplayDriver} using the given runtime context
      * and configuration. Call {@link EInkDisplayDriver#initialize()} on the returned driver
      * before use.

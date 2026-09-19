@@ -352,12 +352,6 @@ public final class DisplaySmokeTest {
     }
 
     private static DisplayDriverFactory findFactory(String name) {
-        return ServiceLoaderUtil.selectProvider(
-                DisplayDriverFactory.class,
-                DisplayDriverFactory::name,
-                DisplayDriverFactory::priority,
-                DisplayDriverFactory::isAvailable,
-                name,
-                "display driver factory");
+        return DisplayDriverFactory.select(name);
     }
 }

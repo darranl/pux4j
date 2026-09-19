@@ -33,6 +33,24 @@ public interface TouchDriverFactory {
     default boolean isAvailable() { return true; }
 
     /**
+     * Selects a factory by name, or — when {@code requestedName} is null — the
+     * highest-priority factory reporting {@link #isAvailable()}.
+     *
+     * @param requestedName the name to select, or {@code null} to auto-select
+     * @return the selected factory
+     * @throws IllegalStateException if no match is found, listing what was seen
+     */
+    static TouchDriverFactory select(String requestedName) {
+        return ServiceLoaderUtil.selectProvider(
+                TouchDriverFactory.class,
+                TouchDriverFactory::name,
+                TouchDriverFactory::priority,
+                TouchDriverFactory::isAvailable,
+                requestedName,
+                "touch driver factory");
+    }
+
+    /**
      * Creates a new, uninitialised {@link TouchDriver} using the given runtime context
      * and configuration. Call {@link TouchDriver#initialize()} on the returned driver
      * before use.

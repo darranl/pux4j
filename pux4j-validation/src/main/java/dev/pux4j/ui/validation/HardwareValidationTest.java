@@ -66,20 +66,8 @@ public final class HardwareValidationTest {
         ReportWriter reportWriter = null;
 
         try {
-            DisplayDriverFactory displayFactory = ServiceLoaderUtil.selectProvider(
-                DisplayDriverFactory.class,
-                DisplayDriverFactory::name,
-                DisplayDriverFactory::priority,
-                DisplayDriverFactory::isAvailable,
-                options.displayDriver,
-                "display driver factory");
-            TouchDriverFactory touchFactory = ServiceLoaderUtil.selectProvider(
-                TouchDriverFactory.class,
-                TouchDriverFactory::name,
-                TouchDriverFactory::priority,
-                TouchDriverFactory::isAvailable,
-                options.touchDriver,
-                "touch driver factory");
+            DisplayDriverFactory displayFactory = DisplayDriverFactory.select(options.displayDriver);
+            TouchDriverFactory touchFactory = TouchDriverFactory.select(options.touchDriver);
 
             String resolvedDisplay = displayFactory.name();
             String resolvedTouch = touchFactory.name();

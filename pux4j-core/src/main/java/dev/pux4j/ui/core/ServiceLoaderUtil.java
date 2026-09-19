@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package dev.pux4j.ui.validation;
+package dev.pux4j.ui.core;
 
 import java.util.Comparator;
 import java.util.List;
