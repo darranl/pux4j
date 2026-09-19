@@ -5,6 +5,8 @@ import dev.pux4j.ui.core.DisplayDriverFactory;
 import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.EInkDisplayDriver;
 import dev.pux4j.ui.core.MonochromeFrame;
+import dev.pux4j.ui.core.Orientation;
+import dev.pux4j.ui.core.OrientationMapping;
 import dev.pux4j.ui.core.Pux4jContext;
 import dev.pux4j.ui.core.RefreshMode;
 import org.slf4j.Logger;
@@ -53,8 +55,12 @@ public final class DisplaySmokeTest {
         log.info("display dimensions = {}x{} native ({} bytes per frame)", WIDTH, HEIGHT, FRAME_BYTES);
         log.info("landscape view: {}px wide x {}px tall", HEIGHT, WIDTH);
 
+        // Only real hardware drivers read this back (Ssd1680DisplayDriver/Ssd1675aDisplayDriver
+        // via DriverConfig — see orientationFor). EmulatedDisplayDriverFactory ignores config
+        // entirely and derives its own orientation from the selected EmulatorDisplayProfile, so
+        // this value doesn't matter for the emulator; orientationFor tolerates that.
         DriverConfig config = DriverConfig.builder()
-            .property("orientation", "LANDSCAPE")
+            .property("orientation", orientationFor(factory.name()).name())
                 .build();
         try (Pux4jContext ctx = Pux4jContext.managed()) {
             EInkDisplayDriver driver = factory.create(ctx, config);
@@ -63,6 +69,12 @@ public final class DisplaySmokeTest {
             long initStart = System.nanoTime();
             driver.initialize();
             log.info("initialize complete in {} ms", elapsedMs(initStart));
+
+            // The driver's own getOrientation() is authoritative post-construction for every
+            // driver kind, unlike the config property above: real hardware drivers just echo
+            // back what they were given, but the emulator ignores that and reports its actual
+            // selected profile's orientation instead — this is what the arrow marker must use.
+            Orientation orientation = driver.getOrientation();
 
             // Query display dimensions and compute layout constants
             WIDTH = driver.getWidth();
@@ -86,6 +98,20 @@ public final class DisplaySmokeTest {
             log.info("block dimensions: {}x{} px, inner: {}x{} px",
                 BLOCK_HALF_ROWS * 2, BLOCK_HALF_BYTES * 8,
                 INNER_HALF_ROWS * 2, INNER_HALF_BYTES * 8);
+
+            // ── Step 0: FULL refresh — up-arrow orientation marker ────────────
+            // Drawn before anything else: none of steps 1-7's patterns (bars, stripes,
+            // checker) make it obvious at a glance which physical edge is "up" in logical
+            // space. A solid arrow pointing toward logical (x=0..logicalWidth, y=0) answers
+            // that immediately. Built with Canvas/OrientationMapping (pux4j-core) rather than
+            // by hand at the byte level like the rest of this class, since an arrow shape
+            // needs real drawing primitives (fillPolygon) that aren't worth reimplementing
+            // here — see notes/project-plan.md Phase 6.0.
+            banner("Step 0: FULL refresh — up-arrow orientation marker");
+            log.info("OBSERVE (landscape): solid black arrow pointing toward the top of the panel");
+            OrientationMapping orientationMapping = OrientationMapping.of(WIDTH, HEIGHT, orientation);
+            doFull(driver, upArrowMarker(orientationMapping), "up-arrow orientation marker");
+            sleepWithProgress(4_000, "observe step 0");
 
             // ── Step 1: FULL slow — three-bar marker ──────────────────────────
             // Three evenly-spaced vertical bars in landscape: left edge, centre,
@@ -231,6 +257,39 @@ public final class DisplaySmokeTest {
     // ── Frame patterns ────────────────────────────────────────────────────────
 
     /**
+     * A solid black arrow pointing toward the top of logical space (logical y=0) —
+     * the orientation marker for Step 0. Drawn with {@link Canvas} in logical coordinates
+     * rather than by hand on the raw framebuffer, unlike every other pattern in this class:
+     * an arrow needs a filled triangle, and {@link Canvas#fillPolygon} already exists rather
+     * than being worth reimplementing at the byte level for one shape.
+     */
+    private static byte[] upArrowMarker(OrientationMapping mapping) {
+        Canvas canvas = new Canvas(mapping);
+        canvas.setBlack();
+
+        int w = mapping.logicalWidth();
+        int h = mapping.logicalHeight();
+        int cx = w / 2;
+        int margin = Math.max(4, h / 12);
+        int headHeight = (h - margin * 2) * 2 / 5;
+        int headHalfWidth = Math.max(8, (w * 3 / 10) / 2);
+        int shaftHalfWidth = Math.max(4, headHalfWidth / 3);
+        int shaftTop = margin + headHeight;
+        int shaftBottom = h - margin;
+
+        // Arrowhead: apex at the smallest y (top of logical space).
+        canvas.fillPolygon(
+            new int[]{cx, cx - headHalfWidth, cx + headHalfWidth},
+            new int[]{margin, shaftTop, shaftTop},
+            3
+        );
+        // Shaft, below the head.
+        canvas.fillRect(cx - shaftHalfWidth, shaftTop, shaftHalfWidth * 2, shaftBottom - shaftTop);
+
+        return canvas.packMonochrome();
+    }
+
+    /**
      * Three evenly-spaced 16-pixel-wide black vertical bars on a white background,
      * as seen in landscape. Scaled to display height.
      */
@@ -353,5 +412,27 @@ public final class DisplaySmokeTest {
 
     private static DisplayDriverFactory findFactory(String name) {
         return DisplayDriverFactory.select(name);
+    }
+
+    // The physical mounting orientation of each supported HAT — a fixed hardware fact, not
+    // something that varies at runtime (both panels are portrait-native chips viewed in
+    // landscape, but hat-2in13v4/SSD1680 is mounted 180 degrees from hat-2in9v2/SSD1675A).
+    // This is the fourth place this exact fact is now recorded (pux4j-validation/pom.xml's
+    // dist-hat-2in13v4/dist-hat-2in9v2 profiles, EmulatorDisplayProfile, and
+    // run-hardware-validation.sh's per-profile --orientation) — worth consolidating onto one
+    // driver-owned source later (mirroring TouchDriverFactory.touchCalibration), not done here
+    // since only the arrow marker actually depends on getting it right today.
+    //
+    // Only meaningful for the two real hardware drivers, which have no other way to learn
+    // their own orientation (see the DriverConfig "orientation" property above). "emulator"
+    // returns an arbitrary value — EmulatedDisplayDriverFactory ignores it and derives the
+    // real answer itself, read back afterwards via driver.getOrientation().
+    private static Orientation orientationFor(String displayFactoryName) {
+        return switch (displayFactoryName) {
+            case "ssd1680" -> Orientation.LANDSCAPE_INVERTED;
+            case "ssd1675a", "emulator" -> Orientation.LANDSCAPE;
+            default -> throw new IllegalStateException(
+                "No known physical orientation for display driver '" + displayFactoryName + "'");
+        };
     }
 }

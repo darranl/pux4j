@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.pux4j.ui.validation;
 
-import dev.pux4j.ui.core.Orientation;
+import dev.pux4j.ui.core.OrientationMapping;
 import java.util.ArrayList;
 import java.util.Arrays;
 
@@ -120,21 +120,19 @@ final class Canvas {
         0x10, 0x08, 0x08, 0x10, 0x08, // '~'
     };
 
-    private final int logicalW;
-    private final int logicalH;
-    private final int fbW;
-    private final int fbH;
-    private final Orientation orientation;
+    private final OrientationMapping orientationMapping;
     private final int[] pixels;
     private int colour = 0xFF000000; // black
 
-    Canvas(int logicalW, int logicalH, int fbW, int fbH, Orientation orientation) {
-        this.logicalW = logicalW;
-        this.logicalH = logicalH;
-        this.fbW = fbW;
-        this.fbH = fbH;
-        this.orientation = orientation;
-        this.pixels = new int[logicalW * logicalH];
+    // Takes the mapping rather than separate width/height/orientation params: those are
+    // otherwise redundant with each other (logicalWidth/Height are derivable from
+    // framebufferWidth/Height + orientation) and nothing enforced the caller passing
+    // consistent values — a wrong logicalW/H here silently corrupts packMonochrome's byte
+    // indexing instead of failing loudly. One OrientationMapping instance is now the only
+    // way to supply these, so "these agree" is a type-level fact, not a caller convention.
+    Canvas(OrientationMapping orientationMapping) {
+        this.orientationMapping = orientationMapping;
+        this.pixels = new int[orientationMapping.logicalWidth() * orientationMapping.logicalHeight()];
         Arrays.fill(pixels, 0xFFFFFFFF); // white background
     }
 
@@ -281,6 +279,10 @@ final class Canvas {
     // array, applying the orientation mapping from logical (x,y) to framebuffer (fx,fy).
     // White pixels → bit 1; black pixels → bit 0 (eInk convention).
     byte[] packMonochrome() {
+        int fbW = orientationMapping.framebufferWidth();
+        int fbH = orientationMapping.framebufferHeight();
+        int logicalW = orientationMapping.logicalWidth();
+        int logicalH = orientationMapping.logicalHeight();
         int fbRowBytes = (fbW + 7) / 8;
         byte[] out = new byte[fbRowBytes * fbH];
         Arrays.fill(out, (byte) 0xFF);
@@ -292,9 +294,8 @@ final class Canvas {
                 int bv = rgb & 0xFF;
                 int lum = (r * 299 + g * 587 + bv * 114) / 1000;
                 if (lum < 128) {
-                    int[] mapped = mapToFramebuffer(x, y);
-                    int fx = mapped[0];
-                    int fy = mapped[1];
+                    int fx = orientationMapping.nativeX(x, y);
+                    int fy = orientationMapping.nativeY(x, y);
                     int idx = fy * fbRowBytes + (fx / 8);
                     int bit = 7 - (fx % 8);
                     out[idx] = (byte) (out[idx] & ~(1 << bit));
@@ -305,25 +306,11 @@ final class Canvas {
     }
 
     private void setPixel(int x, int y) {
+        int logicalW = orientationMapping.logicalWidth();
+        int logicalH = orientationMapping.logicalHeight();
         if (x >= 0 && x < logicalW && y >= 0 && y < logicalH) {
             pixels[y * logicalW + x] = colour;
         }
     }
 
-    // The native framebuffer (fbW x fbH) is always portrait-shaped (narrow x tall — see
-    // Ssd1680DisplayDriver.WIDTH/HEIGHT). PORTRAIT is therefore the identity mapping;
-    // LANDSCAPE/LANDSCAPE_INVERTED require a proper 90-degree rotation (axis swap + exactly
-    // one flip — NOT a mirror/transpose, which is axis swap + zero or two flips and has the
-    // wrong handedness for a physical screen rotation). Direction empirically confirmed on
-    // LittleRaspberry (hat-2in13v4, LANDSCAPE_INVERTED) 2026-08-30: an earlier transpose-based
-    // attempt ({ly, lx} / {fbW-1-ly, fbH-1-lx}, determinant -1) rendered correct aspect ratio
-    // and right-way-up but mirrored left-right.
-    private int[] mapToFramebuffer(int lx, int ly) {
-        return switch (orientation) {
-            case LANDSCAPE          -> new int[]{ly, fbH - 1 - lx};
-            case LANDSCAPE_INVERTED -> new int[]{fbW - 1 - ly, lx};
-            case PORTRAIT           -> new int[]{lx, ly};
-            case PORTRAIT_INVERTED  -> new int[]{fbW - 1 - lx, fbH - 1 - ly};
-        };
-    }
 }

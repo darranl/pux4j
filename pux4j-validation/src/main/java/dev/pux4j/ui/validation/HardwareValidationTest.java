@@ -6,6 +6,7 @@ import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.EInkDisplayDriver;
 import dev.pux4j.ui.core.MonochromeFrame;
 import dev.pux4j.ui.core.Orientation;
+import dev.pux4j.ui.core.OrientationMapping;
 import dev.pux4j.ui.core.Pux4jContext;
 import dev.pux4j.ui.core.RefreshMode;
 import dev.pux4j.ui.core.TouchCoordinateMapper;
@@ -89,21 +90,15 @@ public final class HardwareValidationTest {
             int framebufferWidth = display.getWidth();
             int framebufferHeight = display.getHeight();
 
-            int logicalWidth = logicalWidth(options.orientation, framebufferWidth, framebufferHeight);
-            int logicalHeight = logicalHeight(options.orientation, framebufferWidth, framebufferHeight);
+            var orientationMapping = OrientationMapping.of(framebufferWidth, framebufferHeight, options.orientation);
+            int logicalWidth = orientationMapping.logicalWidth();
+            int logicalHeight = orientationMapping.logicalHeight();
 
-            var mapper = new TouchCoordinateMapper(
-                logicalWidth,
-                logicalHeight,
-                options.touchNativeWidth,
-                options.touchNativeHeight,
-                options.flipX,
-                options.flipY,
-                options.swapAxes
-            );
+            var calibration = touchFactory.touchCalibration(logicalWidth, logicalHeight);
+            var mapper = new TouchCoordinateMapper(logicalWidth, logicalHeight, calibration);
 
             reportWriter = new ReportWriter(resolvedDisplay, options.notes);
-            var renderer = new Renderer(framebufferWidth, framebufferHeight, logicalWidth, logicalHeight, options.orientation);
+            var renderer = new Renderer(orientationMapping);
             var touchPoller = new TouchPoller(touch, mapper);
 
             var allSteps = ValidationStepFactory.build(logicalWidth, logicalHeight);
@@ -295,34 +290,10 @@ public final class HardwareValidationTest {
             .build();
     }
 
-    // The SSD1680/SSD1675A native framebuffer is always narrow x tall (portrait-shaped —
-    // e.g. 122x250 on hat-2in13v4, 128x296 on hat-2in9v2); the physical panel is landscape.
-    // So LANDSCAPE/LANDSCAPE_INVERTED must swap the native dimensions; PORTRAIT/PORTRAIT_INVERTED
-    // use them as-is. (Confirmed against Ssd1680DisplayDriver.WIDTH/HEIGHT and
-    // DisplaySmokeTest's independently-verified "landscape view: 250px wide x 122px tall".)
-    private static int logicalWidth(Orientation orientation, int framebufferWidth, int framebufferHeight) {
-        return switch (orientation) {
-            case LANDSCAPE, LANDSCAPE_INVERTED -> framebufferHeight;
-            case PORTRAIT, PORTRAIT_INVERTED   -> framebufferWidth;
-        };
-    }
-
-    private static int logicalHeight(Orientation orientation, int framebufferWidth, int framebufferHeight) {
-        return switch (orientation) {
-            case LANDSCAPE, LANDSCAPE_INVERTED -> framebufferWidth;
-            case PORTRAIT, PORTRAIT_INVERTED   -> framebufferHeight;
-        };
-    }
-
     private record Options(
         String displayDriver,
         String touchDriver,
         Orientation orientation,
-        int touchNativeWidth,
-        int touchNativeHeight,
-        boolean flipX,
-        boolean flipY,
-        boolean swapAxes,
         int dcPin,
         int rstPin,
         int busyPin,
@@ -337,11 +308,6 @@ public final class HardwareValidationTest {
             String displayDriver = null;
             String touchDriver = null;
             Orientation orientation = Orientation.LANDSCAPE;
-            int touchNativeWidth = 4096;
-            int touchNativeHeight = 4096;
-            boolean flipX = false;
-            boolean flipY = false;
-            boolean swapAxes = false;
             int dcPin = 25;
             int rstPin = 17;
             int busyPin = 24;
@@ -358,11 +324,6 @@ public final class HardwareValidationTest {
                     case "--display" -> displayDriver = requireValue(args, ++i, arg);
                     case "--touch" -> touchDriver = requireValue(args, ++i, arg);
                     case "--orientation" -> orientation = Orientation.valueOf(requireValue(args, ++i, arg).toUpperCase(Locale.ROOT));
-                    case "--touch-native-width" -> touchNativeWidth = Integer.parseInt(requireValue(args, ++i, arg));
-                    case "--touch-native-height" -> touchNativeHeight = Integer.parseInt(requireValue(args, ++i, arg));
-                    case "--flip-x" -> flipX = true;
-                    case "--flip-y" -> flipY = true;
-                    case "--swap-axes" -> swapAxes = true;
                     case "--dc-pin" -> dcPin = Integer.parseInt(requireValue(args, ++i, arg));
                     case "--rst-pin" -> rstPin = Integer.parseInt(requireValue(args, ++i, arg));
                     case "--busy-pin" -> busyPin = Integer.parseInt(requireValue(args, ++i, arg));
@@ -395,11 +356,6 @@ public final class HardwareValidationTest {
                 displayDriver,
                 touchDriver,
                 orientation,
-                touchNativeWidth,
-                touchNativeHeight,
-                flipX,
-                flipY,
-                swapAxes,
                 dcPin,
                 rstPin,
                 busyPin,
@@ -522,22 +478,17 @@ public final class HardwareValidationTest {
 
     private static final class Renderer {
 
-        private final int framebufferWidth;
-        private final int framebufferHeight;
+        // Takes the mapping rather than separate width/height/orientation params — same
+        // reasoning as Canvas's constructor: those are redundant with each other and nothing
+        // enforced a caller passing consistent values.
+        private final OrientationMapping orientationMapping;
         private final int logicalWidth;
         private final int logicalHeight;
-        private final Orientation orientation;
 
-        private Renderer(int framebufferWidth,
-                         int framebufferHeight,
-                         int logicalWidth,
-                         int logicalHeight,
-                         Orientation orientation) {
-            this.framebufferWidth = framebufferWidth;
-            this.framebufferHeight = framebufferHeight;
-            this.logicalWidth = logicalWidth;
-            this.logicalHeight = logicalHeight;
-            this.orientation = orientation;
+        private Renderer(OrientationMapping orientationMapping) {
+            this.orientationMapping = orientationMapping;
+            this.logicalWidth = orientationMapping.logicalWidth();
+            this.logicalHeight = orientationMapping.logicalHeight();
         }
 
         private int logicalWidth() {
@@ -549,7 +500,7 @@ public final class HardwareValidationTest {
         }
 
         private Canvas blankCanvas() {
-            return new Canvas(logicalWidth, logicalHeight, framebufferWidth, framebufferHeight, orientation);
+            return new Canvas(orientationMapping);
         }
 
         private Canvas renderInstruction(int step, int total, String instruction, int passed, int failed) {

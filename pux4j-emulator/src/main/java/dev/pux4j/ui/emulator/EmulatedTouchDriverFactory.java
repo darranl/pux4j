@@ -3,6 +3,7 @@ package dev.pux4j.ui.emulator;
 
 import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.Pux4jContext;
+import dev.pux4j.ui.core.TouchCalibration;
 import dev.pux4j.ui.core.TouchDriver;
 import dev.pux4j.ui.core.TouchDriverFactory;
 
@@ -33,5 +34,14 @@ public final class EmulatedTouchDriverFactory implements TouchDriverFactory {
                 + "Create the display driver first.");
         }
         return touch;
+    }
+
+    // EmulatedTouchDriver already reports coordinates in display-logical space (mouse
+    // position / scale factor — see EmulatedTouchDriver.onMousePressed), so its "native"
+    // resolution is whatever display is currently selected, not a fixed physical constant
+    // like the hardware drivers': an identity calibration matching the display exactly.
+    @Override
+    public TouchCalibration touchCalibration(int displayLogicalWidth, int displayLogicalHeight) {
+        return new TouchCalibration(displayLogicalWidth, displayLogicalHeight, false, false, false);
     }
 }

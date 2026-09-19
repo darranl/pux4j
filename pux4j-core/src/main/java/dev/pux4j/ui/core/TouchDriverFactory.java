@@ -60,4 +60,19 @@ public interface TouchDriverFactory {
      * @return a new driver instance
      */
     TouchDriver create(Pux4jContext context, DriverConfig config);
+
+    /**
+     * Returns this touch IC's physical calibration relative to the display it is bonded to —
+     * see {@link TouchCalibration}. A real hardware driver returns a fixed constant of its
+     * specific IC-and-panel pairing and ignores the arguments; a driver whose raw readings are
+     * already in display logical space (e.g. the emulator, which synthesizes touches directly
+     * from mouse position) uses {@code displayLogicalWidth}/{@code displayLogicalHeight} to
+     * report an identity calibration matching whatever display is currently selected.
+     *
+     * @param displayLogicalWidth  the selected display's current logical width, for drivers
+     *                             whose native resolution is defined relative to it
+     * @param displayLogicalHeight the selected display's current logical height, for drivers
+     *                             whose native resolution is defined relative to it
+     */
+    TouchCalibration touchCalibration(int displayLogicalWidth, int displayLogicalHeight);
 }

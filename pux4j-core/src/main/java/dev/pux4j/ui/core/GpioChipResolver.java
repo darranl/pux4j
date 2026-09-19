@@ -17,7 +17,9 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,6 +38,12 @@ import java.util.regex.Pattern;
  * {@code /dev/gpiochipN} and matching the {@code pinctrl-} label prefix common to the header
  * controller across every Raspberry Pi generation, via {@code GPIO_GET_CHIPINFO_IOCTL}
  * (Linux GPIO character-device uAPI, {@code <linux/gpio.h>}).
+ *
+ * <p>Matches are deduplicated by canonical real device path, not by chip number: some
+ * systems register a symlink alias for the header chip (observed on LittleRaspberry, 2026-09
+ * — {@code /dev/gpiochip4} symlinked to {@code /dev/gpiochip0}, both reporting the identical
+ * {@code pinctrl-bcm2835} label) that would otherwise look like a second, distinct header
+ * chip and trip the "expected exactly one" check below.
  *
  * <p>Callers may bypass detection entirely with the {@code gpioChip} {@link DriverConfig}
  * property.
@@ -106,7 +114,14 @@ public final class GpioChipResolver {
             return cachedHeaderChip;
         }
         List<Integer> candidates = new ArrayList<>();
-        List<Integer> matches = new ArrayList<>();
+        // Keyed by each match's canonical real device path, not by chip number: some
+        // systems register a symlink alias for the header chip (e.g. LittleRaspberry,
+        // 2026-09, /dev/gpiochip4 -> /dev/gpiochip0 — both names report the identical
+        // pinctrl-bcm2835 label because they resolve to the exact same physical device).
+        // Without this, that alias is wrongly counted as a second, distinct header chip.
+        // When two names do alias the same device, the lower chip number wins, matching
+        // the pre-existing expectation of chip 0 on non-Pi5 boards.
+        Map<Path, Integer> matchesByRealPath = new LinkedHashMap<>();
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(Path.of(DEV_DIR), "gpiochip*")) {
             for (Path entry : stream) {
                 Matcher m = CHIP_NAME.matcher(entry.getFileName().toString());
@@ -117,13 +132,19 @@ public final class GpioChipResolver {
                 candidates.add(chip);
                 String label = readLabel(entry);
                 log.debug("{}: label='{}'", entry, label);
-                if (label.startsWith(HEADER_LABEL_PREFIX)) {
-                    matches.add(chip);
+                if (!label.startsWith(HEADER_LABEL_PREFIX)) {
+                    continue;
+                }
+                Path realPath = entry.toRealPath();
+                Integer existing = matchesByRealPath.get(realPath);
+                if (existing == null || chip < existing) {
+                    matchesByRealPath.put(realPath, chip);
                 }
             }
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to list " + DEV_DIR + "/gpiochip*", e);
         }
+        List<Integer> matches = new ArrayList<>(matchesByRealPath.values());
         if (matches.size() != 1) {
             throw new IllegalStateException(
                 "Expected exactly one GPIO chip labelled '" + HEADER_LABEL_PREFIX

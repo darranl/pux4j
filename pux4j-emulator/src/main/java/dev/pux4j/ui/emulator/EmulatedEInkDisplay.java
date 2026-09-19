@@ -8,6 +8,7 @@ import dev.pux4j.ui.core.FourGrayFrame;
 import dev.pux4j.ui.core.FrameData;
 import dev.pux4j.ui.core.MonochromeFrame;
 import dev.pux4j.ui.core.Orientation;
+import dev.pux4j.ui.core.OrientationMapping;
 import dev.pux4j.ui.core.PixelFormat;
 import dev.pux4j.ui.core.RefreshMode;
 import javafx.application.Platform;
@@ -51,6 +52,7 @@ public final class EmulatedEInkDisplay implements EInkDisplayDriver {
     private final int screenHeight;
     private final int scaleFactor;
     private final Orientation orientation;
+    private final OrientationMapping orientationMapping;
     private final DisplayCapabilities capabilities;
 
     private volatile Canvas canvas;
@@ -62,14 +64,9 @@ public final class EmulatedEInkDisplay implements EInkDisplayDriver {
         this.nativeHeight = nativeHeight;
         this.scaleFactor  = scaleFactor;
         this.orientation  = orientation;
-        this.screenWidth  = switch (orientation) {
-            case LANDSCAPE, LANDSCAPE_INVERTED -> nativeHeight;
-            case PORTRAIT, PORTRAIT_INVERTED   -> nativeWidth;
-        };
-        this.screenHeight = switch (orientation) {
-            case LANDSCAPE, LANDSCAPE_INVERTED -> nativeWidth;
-            case PORTRAIT, PORTRAIT_INVERTED   -> nativeHeight;
-        };
+        this.orientationMapping = OrientationMapping.of(nativeWidth, nativeHeight, orientation);
+        this.screenWidth  = orientationMapping.logicalWidth();
+        this.screenHeight = orientationMapping.logicalHeight();
         this.capabilities = new DisplayCapabilities(
             formats, modes, false, Optional.empty());
     }
@@ -168,16 +165,11 @@ public final class EmulatedEInkDisplay implements EInkDisplayDriver {
 
     // Maps a point in the native (portrait-shaped, un-rotated) framebuffer to its position in
     // the on-screen (logical/landscape) view — the inverse of the transform a real panel's
-    // physical mounting performs for free. Mirrors (inverted) Canvas.mapToFramebuffer in
-    // pux4j-validation, which cannot be shared directly: different module, and that method
-    // maps the opposite direction (logical -> native, for writing).
+    // physical mounting performs for free. Delegates to OrientationMapping (pux4j-core), the
+    // single implementation Canvas.packMonochrome (pux4j-validation) also uses for the
+    // opposite direction (logical -> native, for writing) — see notes/project-plan.md Phase 6.0.
     private int[] mapNativeToScreen(int nx, int ny) {
-        return switch (orientation) {
-            case LANDSCAPE          -> new int[]{ nativeHeight - 1 - ny, nx };
-            case LANDSCAPE_INVERTED -> new int[]{ ny, nativeWidth - 1 - nx };
-            case PORTRAIT           -> new int[]{ nx, ny };
-            case PORTRAIT_INVERTED  -> new int[]{ nativeWidth - 1 - nx, nativeHeight - 1 - ny };
-        };
+        return new int[]{ orientationMapping.logicalX(nx, ny), orientationMapping.logicalY(nx, ny) };
     }
 
     // Rotates a native-space rectangle (absolute offset rx,ry; nativeArgb is rw*rh, region-
