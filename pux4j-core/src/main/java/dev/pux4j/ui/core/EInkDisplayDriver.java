@@ -76,10 +76,11 @@ public interface EInkDisplayDriver {
      * Hardware I/O executes on a virtual thread; the future completes when the BUSY pin clears.
      * Coordinates must satisfy {@link DisplayCapabilities#partialAlignment()}.
      *
-     * @param x      left edge of the region in logical pixels
-     * @param y      top edge of the region in logical pixels
-     * @param width  region width in logical pixels
-     * @param height region height in logical pixels
+     * @param x      left edge of the region in native framebuffer pixels; must be a multiple of
+     *               {@link DisplayCapabilities#partialAlignment()}'s {@code xStepPx}
+     * @param y      top edge of the region in native framebuffer pixels
+     * @param width  region width in native framebuffer pixels
+     * @param height region height in native framebuffer pixels
      * @param frame  pixel data for the region; must be a {@link MonochromeFrame}
      * @return a future that completes when the display has finished refreshing
      * @throws UnsupportedOperationException if the driver does not support partial refresh

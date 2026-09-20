@@ -13,6 +13,16 @@ public final class RenderOptions {
 
     private static final float[] DEFAULT_FOUR_GRAY_BOUNDARIES = {64f, 128f, 192f};
 
+    /**
+     * The single source of truth for the default 4-gray classification boundaries — used by
+     * {@link Builder}'s own default and by {@link PixelTransforms}' 4-argument
+     * {@code transform} overload, so the two can never drift apart. See {@code RenderOptions}'s
+     * class doc.
+     */
+    static float[] defaultFourGrayBinBoundaries() {
+        return DEFAULT_FOUR_GRAY_BOUNDARIES.clone();
+    }
+
     private final PixelFormat       pixelFormat;
     private final TransformStrategy strategy;
     private final int               maxPartials;
@@ -45,7 +55,7 @@ public final class RenderOptions {
     public static RenderOptions monochromeDefaults() {
         return builder()
             .pixelFormat(PixelFormat.MONOCHROME)
-            .strategy(TransformStrategy.FLOYD_STEINBERG)
+            .strategy(TransformStrategy.THRESHOLD)
             .build();
     }
 
@@ -60,7 +70,7 @@ public final class RenderOptions {
 
     public static final class Builder {
         private PixelFormat       pixelFormat          = PixelFormat.MONOCHROME;
-        private TransformStrategy strategy             = TransformStrategy.FLOYD_STEINBERG;
+        private TransformStrategy strategy             = TransformStrategy.THRESHOLD;
         private int               maxPartials          = 5;
         private int               maxRegions           = 1;
         private float             fullRefreshThreshold = 0.5f;
@@ -79,6 +89,40 @@ public final class RenderOptions {
         public Builder fourGrayBinBoundaries(float[] v)   { fourGrayBinBoundaries = v.clone(); return this; }
         public Builder preferFastRefresh(boolean v)        { preferFastRefresh = v;    return this; }
 
-        public RenderOptions build() { return new RenderOptions(this); }
+        /**
+         * Validates all tuning parameters before construction, so a mistake here is a
+         * {@code build()}-time failure at the call site that made it — not a deferred one
+         * surfacing days later, out of context, from deep inside {@link FrameDiff} or
+         * {@link PixelTransforms} on whatever {@code prepare()} call first exercises the
+         * bad value (e.g. {@code maxRegions(0)} would otherwise only fail on the second
+         * {@code prepare()} call, since the first always takes the unconditional-FULL path).
+         */
+        public RenderOptions build() {
+            if (maxRegions < 1) {
+                throw new IllegalArgumentException("maxRegions must be >= 1, got " + maxRegions);
+            }
+            if (maxPartials < 1) {
+                throw new IllegalArgumentException("maxPartials must be >= 1, got " + maxPartials);
+            }
+            if (mergeThresholdPx < 0) {
+                throw new IllegalArgumentException("mergeThresholdPx must be >= 0, got " + mergeThresholdPx);
+            }
+            if (fullRefreshThreshold < 0f || fullRefreshThreshold > 1f) {
+                throw new IllegalArgumentException(
+                    "fullRefreshThreshold must be in [0, 1], got " + fullRefreshThreshold);
+            }
+            if (fourGrayBinBoundaries.length != 3) {
+                throw new IllegalArgumentException(
+                    "fourGrayBinBoundaries must have exactly 3 values [lo, mid, hi], got "
+                        + fourGrayBinBoundaries.length);
+            }
+            if (!(fourGrayBinBoundaries[0] < fourGrayBinBoundaries[1]
+                    && fourGrayBinBoundaries[1] < fourGrayBinBoundaries[2])) {
+                throw new IllegalArgumentException(
+                    "fourGrayBinBoundaries must be strictly ascending [lo, mid, hi], got "
+                        + Arrays.toString(fourGrayBinBoundaries));
+            }
+            return new RenderOptions(this);
+        }
     }
 }

@@ -83,3 +83,19 @@ Key checks:
   acceptable for short-lived native operations.
 - **Minimum public API** — if it is not proven to be needed by another module, keep it
   internal. It is easier to open things up later than to take them back.
+- **Test javadoc explains why, not just what.** Every test method gets a short javadoc (or, at
+  minimum, a comment) stating the intent behind it — what specific bug or property it exists to
+  catch, not a restatement of its assertions. `assertEquals(3, r.width())` already says what the
+  test checks; it doesn't say that `3` is deliberately not a multiple of 8, or why that matters.
+  When a test exists because of a specific defect or design decision, say so explicitly (a
+  one-line pointer like "see tier2-transform.md's corrected crop invariant" is enough). The
+  payoff is at regression time: months later, a failing test with only a bare assertion forces
+  someone to reconstruct why it was written before they can tell whether the test or the code
+  is now wrong; a test that states its intent up front answers that immediately.
+- **Javadoc-style for any declaration that deserves an explanatory comment — methods (public or
+  private), fields, and constants alike.** A private method's or field's `/** ... */` won't
+  render into generated API docs, but use the javadoc block form anyway rather than a plain `//`
+  block above the declaration — consistency of style matters more here than the (non-)rendering,
+  and it keeps every declaration in a file looking the same regardless of visibility when
+  skimming the source. Reserve plain `//` comments for what javadoc doesn't fit: inline remarks
+  inside a method body, a note on a single statement, a `TODO`.
