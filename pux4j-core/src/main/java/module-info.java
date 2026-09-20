@@ -62,10 +62,17 @@ module dev.pux4j.ui.core {
     requires org.slf4j;
 
     exports dev.pux4j.ui.core;
+    // FrameRenderSupport (decode FrameData / rotate to logical space) is implementation
+    // detail, not published API — qualified export limits it to the one other module that
+    // needs to share it (pux4j-emulator's JavaFX renderer), per AGENT.md's minimum-public-API
+    // guideline. See notes/project-plan.md Phase 6.3.
+    exports dev.pux4j.ui.core.internal to dev.pux4j.ui.emulator;
 
     uses dev.pux4j.ui.core.DisplayDriverFactory;
     uses dev.pux4j.ui.core.TouchDriverFactory;
 
     provides dev.pux4j.ui.core.DisplayDriverFactory
         with dev.pux4j.ui.core.internal.PngDisplayDriverFactory;
+    provides dev.pux4j.ui.core.TouchDriverFactory
+        with dev.pux4j.ui.core.internal.ProgrammaticTouchDriverFactory;
 }

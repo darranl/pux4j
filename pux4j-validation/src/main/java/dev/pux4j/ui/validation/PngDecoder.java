@@ -10,10 +10,16 @@ import java.util.zip.Inflater;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-// Minimal PNG decoder using java.util.zip.Inflater — no AWT, safe for GraalVM CE native image.
-final class PngReader {
+/**
+ * Minimal pure-format PNG decoder using {@link java.util.zip.Inflater} — no AWT, safe for
+ * GraalVM CE native image. Decodes a PNG byte stream into a generic {@link PngImage} (an ARGB
+ * pixel array); it has no eInk-specific knowledge of its own. Callers that need to turn a
+ * decoded image into an eInk-displayable bitmap use {@link IconRasterizer}, which is a
+ * separate concern — this class only ever answers "what does this PNG file contain".
+ */
+final class PngDecoder {
 
-    private static final Logger log = LoggerFactory.getLogger(PngReader.class);
+    private static final Logger log = LoggerFactory.getLogger(PngDecoder.class);
 
     record PngImage(int[] pixels, int width, int height) {}
 
@@ -54,14 +60,19 @@ final class PngReader {
         }
 
         if (bitDepth != 8) {
-            log.warn("PngReader: unsupported bit depth {}", bitDepth);
+            log.warn("PngDecoder: unsupported bit depth {}", bitDepth);
             return Optional.empty();
         }
+        // channel count per pixel for each supported PNG color type (bit depth 8 only):
+        // 0 = greyscale, 2 = RGB, 6 = RGBA. Greyscale support exists specifically so this
+        // decoder can read back the frame-snapshot PNGs pux4j-core's PngEInkDisplay writes
+        // (see notes/project-plan.md Phase 6.3), not just downloaded colour icon assets.
         int channels = switch (colorType) {
+            case 0 -> 1;  // greyscale
             case 2 -> 3;  // RGB
             case 6 -> 4;  // RGBA
             default -> {
-                log.warn("PngReader: unsupported color type {}", colorType);
+                log.warn("PngDecoder: unsupported color type {}", colorType);
                 yield -1;
             }
         };
@@ -73,10 +84,15 @@ final class PngReader {
         try {
             var inflater = new Inflater();
             inflater.setInput(compressed);
-            inflater.inflate(raw);
+            int off = 0;
+            while (off < raw.length && !inflater.finished()) {
+                int written = inflater.inflate(raw, off, raw.length - off);
+                if (written == 0 && inflater.needsInput()) break;
+                off += written;
+            }
             inflater.end();
         } catch (DataFormatException e) {
-            log.warn("PngReader: inflate failed", e);
+            log.warn("PngDecoder: inflate failed", e);
             return Optional.empty();
         }
 
@@ -104,54 +120,20 @@ final class PngReader {
             System.arraycopy(raw, rowStart, prior, 0, stride);
             for (int x = 0; x < width; x++) {
                 int base = rowStart + 1 + x * channels;
-                int rv = raw[base] & 0xFF;
-                int gv = raw[base + 1] & 0xFF;
-                int bv = raw[base + 2] & 0xFF;
-                int av = channels == 4 ? (raw[base + 3] & 0xFF) : 255;
+                int rv, gv, bv, av;
+                if (channels == 1) {
+                    rv = gv = bv = raw[base] & 0xFF;
+                    av = 255;
+                } else {
+                    rv = raw[base] & 0xFF;
+                    gv = raw[base + 1] & 0xFF;
+                    bv = raw[base + 2] & 0xFF;
+                    av = channels == 4 ? (raw[base + 3] & 0xFF) : 255;
+                }
                 pixels[y * width + x] = (av << 24) | (rv << 16) | (gv << 8) | bv;
             }
         }
         return Optional.of(new PngImage(pixels, width, height));
-    }
-
-    // Scale src to (dstW × dstH) using nearest-neighbour and threshold to monochrome.
-    // Transparent pixels (alpha ≤ 20) → white; luminance ≥ 190 → white; else black.
-    static int[] toMonochrome(PngImage src, int dstW, int dstH) {
-        int[] out = new int[dstW * dstH];
-        for (int dy = 0; dy < dstH; dy++) {
-            int sy = dy * src.height() / dstH;
-            for (int dx = 0; dx < dstW; dx++) {
-                int sx = dx * src.width() / dstW;
-                int argb = src.pixels()[sy * src.width() + sx];
-                int a = (argb >>> 24) & 0xFF;
-                int r = (argb >>> 16) & 0xFF;
-                int g = (argb >>> 8) & 0xFF;
-                int b = argb & 0xFF;
-                int lum = (r * 299 + g * 587 + b * 114) / 1000;
-                out[dy * dstW + dx] = (a > 20 && lum < 190) ? 0xFF000000 : 0xFFFFFFFF;
-            }
-        }
-        return out;
-    }
-
-    // Same as toMonochrome but treats a lower luminance threshold (128) for stark
-    // high-contrast rendering of the completion screen poster image.
-    static int[] toHighContrastMonochrome(PngImage src, int dstW, int dstH) {
-        int[] out = new int[dstW * dstH];
-        for (int dy = 0; dy < dstH; dy++) {
-            int sy = dy * src.height() / dstH;
-            for (int dx = 0; dx < dstW; dx++) {
-                int sx = dx * src.width() / dstW;
-                int argb = src.pixels()[sy * src.width() + sx];
-                int a = (argb >>> 24) & 0xFF;
-                int r = (argb >>> 16) & 0xFF;
-                int g = (argb >>> 8) & 0xFF;
-                int b = argb & 0xFF;
-                int lum = (r * 299 + g * 587 + b * 114) / 1000;
-                out[dy * dstW + dx] = (a > 20 && lum < 128) ? 0xFF000000 : 0xFFFFFFFF;
-            }
-        }
-        return out;
     }
 
     private static int readInt(byte[] data, int off) {

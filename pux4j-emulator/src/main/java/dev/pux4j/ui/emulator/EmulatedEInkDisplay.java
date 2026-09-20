@@ -11,6 +11,7 @@ import dev.pux4j.ui.core.Orientation;
 import dev.pux4j.ui.core.OrientationMapping;
 import dev.pux4j.ui.core.PixelFormat;
 import dev.pux4j.ui.core.RefreshMode;
+import dev.pux4j.ui.core.internal.FrameRenderSupport;
 import javafx.application.Platform;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.image.WritableImage;
@@ -31,15 +32,6 @@ import java.util.concurrent.CompletableFuture;
 public final class EmulatedEInkDisplay implements EInkDisplayDriver {
 
     private static final Logger log = LoggerFactory.getLogger(EmulatedEInkDisplay.class);
-
-    // Four-gray ARGB lookup: index = bwBit * 2 + redBit
-    // (0,0)=black, (0,1)=dark grey, (1,0)=light grey, (1,1)=white
-    private static final int[] FOUR_GRAY_ARGB = {
-        0xFF000000,  // 0: black
-        0xFF505050,  // 1: dark grey   rgb(80,80,80)
-        0xFFB4B4B4,  // 2: light grey  rgb(180,180,180)
-        0xFFFFFFFF,  // 3: white
-    };
 
     // Native chip framebuffer dimensions — always portrait-shaped (narrow x tall), matching
     // every real EInkDisplayDriver's getWidth()/getHeight() contract. writeFrame/writeRegion
@@ -67,8 +59,11 @@ public final class EmulatedEInkDisplay implements EInkDisplayDriver {
         this.orientationMapping = OrientationMapping.of(nativeWidth, nativeHeight, orientation);
         this.screenWidth  = orientationMapping.logicalWidth();
         this.screenHeight = orientationMapping.logicalHeight();
+        // Both real ICs this emulator can stand in for (SSD1675A, SSD1680) require partial
+        // region X coordinates to be 8-px aligned; reporting Optional.empty() here would let
+        // emulator-only code paths silently skip the snapping real hardware enforces.
         this.capabilities = new DisplayCapabilities(
-            formats, modes, false, Optional.empty());
+            formats, modes, false, Optional.of(new AlignmentConstraints(8)));
     }
 
     public EmulatedEInkDisplay(int nativeWidth, int nativeHeight, Orientation orientation,
@@ -146,84 +141,18 @@ public final class EmulatedEInkDisplay implements EInkDisplayDriver {
     }
 
     private void renderFull(Canvas target, FrameData frame) {
-        int[] nativePixels = switch (frame) {
-            case MonochromeFrame mf -> decodeMonochrome(mf.data(), nativeWidth, nativeHeight);
-            case FourGrayFrame   fg -> decodeFourGray(fg.bwPlane(), fg.redPlane(), nativeWidth, nativeHeight);
-        };
-        RotatedRegion screen = rotateToScreen(nativePixels, 0, 0, nativeWidth, nativeHeight);
+        int[] nativePixels = FrameRenderSupport.decode(frame, nativeWidth, nativeHeight);
+        FrameRenderSupport.RotatedRegion screen = FrameRenderSupport.rotateToLogical(
+            orientationMapping, nativePixels, 0, 0, nativeWidth, nativeHeight);
         drawScaled(target, screen.argb(), screen.x(), screen.y(), screen.width(), screen.height());
     }
 
     private void renderRegion(Canvas target, int rx, int ry, int rw, int rh,
                                MonochromeFrame frame) {
-        int[] nativePixels = decodeMonochrome(frame.data(), rw, rh);
-        RotatedRegion screen = rotateToScreen(nativePixels, rx, ry, rw, rh);
+        int[] nativePixels = FrameRenderSupport.decodeMonochrome(frame.data(), rw, rh);
+        FrameRenderSupport.RotatedRegion screen = FrameRenderSupport.rotateToLogical(
+            orientationMapping, nativePixels, rx, ry, rw, rh);
         drawScaled(target, screen.argb(), screen.x(), screen.y(), screen.width(), screen.height());
-    }
-
-    private record RotatedRegion(int[] argb, int x, int y, int width, int height) {}
-
-    // Maps a point in the native (portrait-shaped, un-rotated) framebuffer to its position in
-    // the on-screen (logical/landscape) view — the inverse of the transform a real panel's
-    // physical mounting performs for free. Delegates to OrientationMapping (pux4j-core), the
-    // single implementation Canvas.packMonochrome (pux4j-validation) also uses for the
-    // opposite direction (logical -> native, for writing) — see notes/project-plan.md Phase 6.0.
-    private int[] mapNativeToScreen(int nx, int ny) {
-        return new int[]{ orientationMapping.logicalX(nx, ny), orientationMapping.logicalY(nx, ny) };
-    }
-
-    // Rotates a native-space rectangle (absolute offset rx,ry; nativeArgb is rw*rh, region-
-    // local) into screen space. Computed generically from the 4 corner mappings rather than
-    // per-orientation closed forms, so it works unchanged for all four Orientation values —
-    // including the whole-frame case (rx=0, ry=0, rw=nativeWidth, rh=nativeHeight).
-    private RotatedRegion rotateToScreen(int[] nativeArgb, int rx, int ry, int rw, int rh) {
-        int[] c00 = mapNativeToScreen(rx,        ry);
-        int[] c10 = mapNativeToScreen(rx + rw - 1, ry);
-        int[] c01 = mapNativeToScreen(rx,        ry + rh - 1);
-        int[] c11 = mapNativeToScreen(rx + rw - 1, ry + rh - 1);
-        int minX = Math.min(Math.min(c00[0], c10[0]), Math.min(c01[0], c11[0]));
-        int minY = Math.min(Math.min(c00[1], c10[1]), Math.min(c01[1], c11[1]));
-        int maxX = Math.max(Math.max(c00[0], c10[0]), Math.max(c01[0], c11[0]));
-        int maxY = Math.max(Math.max(c00[1], c10[1]), Math.max(c01[1], c11[1]));
-        int sw = maxX - minX + 1;
-        int sh = maxY - minY + 1;
-
-        int[] screenArgb = new int[sw * sh];
-        for (int ly = 0; ly < rh; ly++) {
-            for (int lx = 0; lx < rw; lx++) {
-                int[] s = mapNativeToScreen(rx + lx, ry + ly);
-                screenArgb[(s[1] - minY) * sw + (s[0] - minX)] = nativeArgb[ly * rw + lx];
-            }
-        }
-        return new RotatedRegion(screenArgb, minX, minY, sw, sh);
-    }
-
-    // Decodes a row-padded 1-bit framebuffer into ARGB pixels.
-    // Each row occupies ceil(width/8) bytes; padding bits at the end of each row are skipped.
-    private static int[] decodeMonochrome(byte[] data, int width, int height) {
-        int rowBytes = (width + 7) / 8;
-        int[] argb = new int[width * height];
-        for (int row = 0; row < height; row++) {
-            for (int col = 0; col < width; col++) {
-                int bit = (data[row * rowBytes + col / 8] >> (7 - (col % 8))) & 1;
-                argb[row * width + col] = bit == 1 ? 0xFFFFFFFF : 0xFF000000;
-            }
-        }
-        return argb;
-    }
-
-    private static int[] decodeFourGray(byte[] bwPlane, byte[] redPlane, int width, int height) {
-        int rowBytes = (width + 7) / 8;
-        int[] argb = new int[width * height];
-        for (int row = 0; row < height; row++) {
-            for (int col = 0; col < width; col++) {
-                int shift = 7 - (col % 8);
-                int bw  = (bwPlane [row * rowBytes + col / 8] >> shift) & 1;
-                int red = (redPlane[row * rowBytes + col / 8] >> shift) & 1;
-                argb[row * width + col] = FOUR_GRAY_ARGB[bw * 2 + red];
-            }
-        }
-        return argb;
     }
 
     private void drawScaled(Canvas target, int[] argb, int destX, int destY,

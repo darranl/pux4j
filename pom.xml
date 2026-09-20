@@ -25,7 +25,6 @@
         <module>pux4j-driver-hat-2in13v4</module>
         <module>pux4j-driver-hat-2in9v2</module>
         <module>pux4j-transform</module>
-        <module>pux4j-test-support</module>
         <module>pux4j-emulator</module>
         <module>pux4j-fx</module>
         <module>pux4j-validation</module>
@@ -125,11 +124,6 @@
             <dependency>
                 <groupId>dev.pux4j.ui</groupId>
                 <artifactId>pux4j-transform</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>dev.pux4j.ui</groupId>
-                <artifactId>pux4j-test-support</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

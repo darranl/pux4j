@@ -65,11 +65,18 @@ public final class EmulatedDisplayDriverFactory implements DisplayDriverFactory 
     public EInkDisplayDriver create(Pux4jContext context, DriverConfig config) {
         EmulatorDisplayProfile profile = selectedProfile();
         int scale = Integer.parseInt(System.getProperty("pux4j.emulator.scale", "3"));
+        // Honors an explicit "orientation" DriverConfig override (e.g. a caller previewing a
+        // different physical mounting) instead of always using the profile's fixed default;
+        // physicalOrientation() above still reports the profile's own fixed mounting fact,
+        // which is unaffected by this per-call override.
+        Orientation orientation = Orientation.valueOf(
+            config.property("orientation", profile.orientation.name()));
 
-        log.debug("Creating emulated display: profile={} scale={}", profile.profileName, scale);
+        log.debug("Creating emulated display: profile={} orientation={} scale={}",
+            profile.profileName, orientation, scale);
 
         var display = new EmulatedEInkDisplay(
-            profile.nativeWidth(), profile.nativeHeight(), profile.orientation,
+            profile.nativeWidth(), profile.nativeHeight(), orientation,
             profile.formats, profile.modes, scale);
         var touch = new EmulatedTouchDriver();
 

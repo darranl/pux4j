@@ -17,6 +17,14 @@ import java.util.concurrent.CompletableFuture;
  * executes on a virtual thread. The returned future completes when the BUSY pin clears.
  * All other methods execute synchronously on the calling thread.
  *
+ * <p><b>At most one write may be in flight per driver instance at a time</b> — a caller must
+ * await the future from {@link #writeFrame}/{@link #writeRegion} before issuing the next call.
+ * Every current implementation (hardware, emulated, and headless) is built around this
+ * assumption; a caller that violates it risks anything from interleaved SPI traffic on real
+ * hardware to a corrupted in-memory frame on a software-only driver. A future multi-writer
+ * caller (e.g. a JavaFX scene-capture bridge) is expected to serialise its own writes — e.g.
+ * via a single dedicated thread draining one queue — rather than relying on drivers to do it.
+ *
  * <h2>RefreshPolicy</h2>
  * <p>Install a {@link RefreshPolicy} via {@link #setRefreshPolicy} to automatically
  * upgrade partial refreshes to full ones after a configurable threshold, limiting

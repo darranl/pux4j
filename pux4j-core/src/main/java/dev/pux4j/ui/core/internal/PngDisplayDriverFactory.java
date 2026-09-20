@@ -20,6 +20,10 @@ public final class PngDisplayDriverFactory implements DisplayDriverFactory {
 
     @Override
     public EInkDisplayDriver create(Pux4jContext context, DriverConfig config) {
+        // "width"/"height" are native (portrait-shaped) framebuffer dimensions — the same
+        // space MonochromeFrame/FourGrayFrame data and writeRegion coordinates are in — not
+        // the logical/on-screen dimensions produced by rotating for "orientation". Defaults
+        // match the SSD1675A (2.9" V2) native framebuffer.
         int width       = config.property("width",  128);
         int height      = config.property("height", 296);
         Orientation orientation = Orientation.valueOf(config.property("orientation", "LANDSCAPE"));

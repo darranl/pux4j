@@ -106,7 +106,6 @@ embedded hardware.
 pux4j/
 ├── pux4j-core/          Hardware drivers and interfaces — no JavaFX dependency
 ├── pux4j-transform/     Pixel transformation pipeline — pure Java, no JavaFX, no Pi4J
-├── pux4j-test-support/  Headless test doubles — test scope only
 ├── pux4j-emulator/      JavaFX visual emulator — dev/test only
 ├── pux4j-fx/            JavaFX bridge
 ├── pux4j-validation/    Interactive hardware validation test
@@ -141,11 +140,6 @@ virtual thread. Translates hardware touch contacts back into JavaFX `MouseEvent`
 
 JavaFX visual emulator for development without physical hardware. Renders the eInk display
 on a desktop window; mouse events feed the touch pipeline.
-
-### `pux4j-test-support`
-
-Headless test doubles: `RecordingEInkDisplay`, `ProgrammaticTouchDriver`, and
-`FramebufferAssertions` (pixel-level + golden-file PNG comparison).
 
 ### `pux4j-validation`
 

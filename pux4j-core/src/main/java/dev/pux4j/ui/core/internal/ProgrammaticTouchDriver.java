@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-package dev.pux4j.ui.test;
+package dev.pux4j.ui.core.internal;
 
+import dev.pux4j.ui.core.ProgrammaticTouchSource;
 import dev.pux4j.ui.core.TouchDriver;
 import dev.pux4j.ui.core.TouchPoint;
 import org.slf4j.Logger;
@@ -10,26 +11,24 @@ import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
- * Queue-based touch driver for tests. Thread-safe.
- * Callers enqueue touch events; {@link #readTouches()} drains one batch per call.
+ * Queue-based {@link TouchDriver} for headless dev-loop and CI use — see
+ * {@link ProgrammaticTouchDriverFactory}. Thread-safe. Callers enqueue touch events via the
+ * public {@link ProgrammaticTouchSource} contract; {@link #readTouches()} drains one batch
+ * per call.
  */
-public final class ProgrammaticTouchDriver implements TouchDriver {
+final class ProgrammaticTouchDriver implements TouchDriver, ProgrammaticTouchSource {
 
     private static final Logger log = LoggerFactory.getLogger(ProgrammaticTouchDriver.class);
 
     private final ConcurrentLinkedQueue<List<TouchPoint>> queue = new ConcurrentLinkedQueue<>();
 
-    /**
-     * Enqueues a single touch contact as one read batch.
-     */
+    @Override
     public void queueTouch(TouchPoint contact) {
         log.trace("queueTouch id={} x={} y={} down={}", contact.id(), contact.x(), contact.y(), contact.down());
         queue.add(List.of(contact));
     }
 
-    /**
-     * Enqueues a multi-contact event as one read batch.
-     */
+    @Override
     public void queueTouches(List<TouchPoint> contacts) {
         log.trace("queueTouches count={}", contacts.size());
         queue.add(List.copyOf(contacts));

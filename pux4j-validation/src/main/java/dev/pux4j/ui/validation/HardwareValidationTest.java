@@ -584,7 +584,7 @@ public final class HardwareValidationTest {
         }
 
         private Canvas renderCompletionScreen(int passed, int failed, Path reportPath) {
-            Optional<PngReader.PngImage> poster = loadResourceImage("icons/Pux.png");
+            Optional<PngDecoder.PngImage> poster = loadResourceImage("icons/Pux.png");
             if (poster.isEmpty()) {
                 return renderFallbackCompletion(passed, failed, reportPath);
             }
@@ -592,7 +592,7 @@ public final class HardwareValidationTest {
             var canvas = blankCanvas();
             drawHeader(canvas, text("header.validationComplete"), text("header.brand"), passed, failed);
             drawCenteredText(canvas, text("screen.complete"), 44, Canvas.SCALE_NORMAL);
-            PngReader.PngImage src = poster.get();
+            PngDecoder.PngImage src = poster.get();
 
             int availableTop = 50;
             int availableBottom = logicalHeight - 28;
@@ -607,7 +607,7 @@ public final class HardwareValidationTest {
             int drawX = (logicalWidth - drawW) / 2;
             int drawY = availableTop + ((availableHeight - drawH) / 2);
 
-            int[] mono = PngReader.toHighContrastMonochrome(src, drawW, drawH);
+            int[] mono = IconRasterizer.toHighContrastMonochrome(src, drawW, drawH);
             canvas.drawImage(mono, drawW, drawH, drawX, drawY);
             canvas.setBlack();
             canvas.drawRect(drawX, drawY, Math.max(0, drawW - 1), Math.max(0, drawH - 1));
@@ -627,7 +627,7 @@ public final class HardwareValidationTest {
             return canvas;
         }
 
-        private Optional<PngReader.PngImage> loadResourceImage(String resourcePath) {
+        private Optional<PngDecoder.PngImage> loadResourceImage(String resourcePath) {
             var candidates = List.of(
                 resourcePath,
                 "/" + resourcePath,
@@ -637,7 +637,7 @@ public final class HardwareValidationTest {
             for (var candidate : candidates) {
                 try (InputStream stream = openResource(candidate)) {
                     if (stream == null) continue;
-                    var image = PngReader.read(stream);
+                    var image = PngDecoder.read(stream);
                     if (image.isPresent()) return image;
                 } catch (IOException e) {
                     log.warn("Unable to load resource image {}", candidate, e);
@@ -833,7 +833,7 @@ public final class HardwareValidationTest {
 
     private static final class ValidationStepFactory {
 
-        private static final Map<String, Optional<PngReader.PngImage>> PNG_CACHE = new HashMap<>();
+        private static final Map<String, Optional<PngDecoder.PngImage>> PNG_CACHE = new HashMap<>();
 
         private static List<ValidationStep> build(int width, int height) {
             int margin = Math.max(8, Math.min(width, height) / 18);
@@ -979,7 +979,7 @@ public final class HardwareValidationTest {
             return (c, bounds) -> {
                 var image = loadIcon(resourcePath);
                 if (image.isPresent()) {
-                    int[] mono = PngReader.toMonochrome(image.get(), bounds.width, bounds.height);
+                    int[] mono = IconRasterizer.toMonochrome(image.get(), bounds.width, bounds.height);
                     c.drawImage(mono, bounds.width, bounds.height, bounds.x, bounds.y);
                 } else {
                     fallback.render(c, bounds);
@@ -989,7 +989,7 @@ public final class HardwareValidationTest {
 
         // Progressive halving to a 512×512 ceiling before caching — prevents huge
         // uncompressed images (e.g. 6000×7000 PNG) from exhausting heap on the Pi Zero.
-        private static PngReader.PngImage scaleDownIcon(PngReader.PngImage source) {
+        private static PngDecoder.PngImage scaleDownIcon(PngDecoder.PngImage source) {
             int maxDim = 512;
             int w = source.width();
             int h = source.height();
@@ -998,11 +998,11 @@ public final class HardwareValidationTest {
                 w = Math.max(1, w / 2);
                 h = Math.max(1, h / 2);
             }
-            int[] scaled = PngReader.toMonochrome(source, w, h);
-            return new PngReader.PngImage(scaled, w, h);
+            int[] scaled = IconRasterizer.toMonochrome(source, w, h);
+            return new PngDecoder.PngImage(scaled, w, h);
         }
 
-        private static Optional<PngReader.PngImage> loadIcon(String resourcePath) {
+        private static Optional<PngDecoder.PngImage> loadIcon(String resourcePath) {
             if (PNG_CACHE.containsKey(resourcePath)) {
                 return PNG_CACHE.get(resourcePath);
             }
@@ -1018,9 +1018,9 @@ public final class HardwareValidationTest {
             }
 
             try (InputStream s = stream) {
-                Optional<PngReader.PngImage> loaded = s == null
+                Optional<PngDecoder.PngImage> loaded = s == null
                     ? Optional.empty()
-                    : PngReader.read(s).map(ValidationStepFactory::scaleDownIcon);
+                    : PngDecoder.read(s).map(ValidationStepFactory::scaleDownIcon);
                 PNG_CACHE.put(resourcePath, loaded);
                 if (loaded.isEmpty()) {
                     log.warn("PNG icon not found: {} (falling back to drawn shape)", resourcePath);
