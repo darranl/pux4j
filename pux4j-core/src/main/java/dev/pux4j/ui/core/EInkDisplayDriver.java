@@ -32,10 +32,20 @@ import java.util.concurrent.CompletableFuture;
  */
 public interface EInkDisplayDriver {
 
-    /** Returns the logical display width in pixels for the current orientation. */
+    /**
+     * Returns the native framebuffer width in pixels — as addressed by the display
+     * controller, always portrait-shaped, <b>not</b> rotated for {@link #getOrientation()}.
+     * Callers that need the on-screen (logical) size should derive it via
+     * {@link OrientationMapping#of(int, int, Orientation)} using this value,
+     * {@link #getHeight()}, and {@link #getOrientation()}.
+     */
     int getWidth();
 
-    /** Returns the logical display height in pixels for the current orientation. */
+    /**
+     * Returns the native framebuffer height in pixels — as addressed by the display
+     * controller, always portrait-shaped, <b>not</b> rotated for {@link #getOrientation()}.
+     * See {@link #getWidth()}.
+     */
     int getHeight();
 
     /** Returns the orientation this driver was configured with. */

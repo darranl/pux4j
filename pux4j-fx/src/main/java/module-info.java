@@ -7,4 +7,7 @@ module dev.pux4j.ui.fx {
     requires org.slf4j;
 
     exports dev.pux4j.ui.fx;
+
+    uses dev.pux4j.ui.core.DisplayDriverFactory;
+    uses dev.pux4j.ui.core.TouchDriverFactory;
 }
