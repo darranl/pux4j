@@ -52,15 +52,14 @@ public final class DisplaySmokeTest {
         banner("DisplaySmokeTest starting");
         DisplayDriverFactory factory = findFactory(driverName);
         log.info("driver = {}", factory.name());
-        log.info("display dimensions = {}x{} native ({} bytes per frame)", WIDTH, HEIGHT, FRAME_BYTES);
-        log.info("landscape view: {}px wide x {}px tall", HEIGHT, WIDTH);
 
-        // Only real hardware drivers read this back (Ssd1680DisplayDriver/Ssd1675aDisplayDriver
-        // via DriverConfig — see orientationFor). EmulatedDisplayDriverFactory ignores config
-        // entirely and derives its own orientation from the selected EmulatorDisplayProfile, so
-        // this value doesn't matter for the emulator; orientationFor tolerates that.
+        // factory.physicalOrientation() is the single owned source for this fact (real hardware
+        // drivers and the emulator each report their own fixed mounting orientation); the
+        // config property is still needed since real hardware drivers read orientation from
+        // DriverConfig at construction time (there is no post-construction setter).
+        Orientation orientation = factory.physicalOrientation();
         DriverConfig config = DriverConfig.builder()
-            .property("orientation", orientationFor(factory.name()).name())
+            .property("orientation", orientation.name())
                 .build();
         try (Pux4jContext ctx = Pux4jContext.managed()) {
             EInkDisplayDriver driver = factory.create(ctx, config);
@@ -69,12 +68,6 @@ public final class DisplaySmokeTest {
             long initStart = System.nanoTime();
             driver.initialize();
             log.info("initialize complete in {} ms", elapsedMs(initStart));
-
-            // The driver's own getOrientation() is authoritative post-construction for every
-            // driver kind, unlike the config property above: real hardware drivers just echo
-            // back what they were given, but the emulator ignores that and reports its actual
-            // selected profile's orientation instead — this is what the arrow marker must use.
-            Orientation orientation = driver.getOrientation();
 
             // Query display dimensions and compute layout constants
             WIDTH = driver.getWidth();
@@ -412,27 +405,5 @@ public final class DisplaySmokeTest {
 
     private static DisplayDriverFactory findFactory(String name) {
         return DisplayDriverFactory.select(name);
-    }
-
-    // The physical mounting orientation of each supported HAT — a fixed hardware fact, not
-    // something that varies at runtime (both panels are portrait-native chips viewed in
-    // landscape, but hat-2in13v4/SSD1680 is mounted 180 degrees from hat-2in9v2/SSD1675A).
-    // This is the fourth place this exact fact is now recorded (pux4j-validation/pom.xml's
-    // dist-hat-2in13v4/dist-hat-2in9v2 profiles, EmulatorDisplayProfile, and
-    // run-hardware-validation.sh's per-profile --orientation) — worth consolidating onto one
-    // driver-owned source later (mirroring TouchDriverFactory.touchCalibration), not done here
-    // since only the arrow marker actually depends on getting it right today.
-    //
-    // Only meaningful for the two real hardware drivers, which have no other way to learn
-    // their own orientation (see the DriverConfig "orientation" property above). "emulator"
-    // returns an arbitrary value — EmulatedDisplayDriverFactory ignores it and derives the
-    // real answer itself, read back afterwards via driver.getOrientation().
-    private static Orientation orientationFor(String displayFactoryName) {
-        return switch (displayFactoryName) {
-            case "ssd1680" -> Orientation.LANDSCAPE_INVERTED;
-            case "ssd1675a", "emulator" -> Orientation.LANDSCAPE;
-            default -> throw new IllegalStateException(
-                "No known physical orientation for display driver '" + displayFactoryName + "'");
-        };
     }
 }

@@ -76,10 +76,19 @@ public final class HardwareValidationTest {
                 ? options.touchI2cAddress
                 : (resolvedTouch.equals("gt1151q") ? 0x14 : 0x48);
 
-            log.info("HardwareValidationTest: displayDriver={}, touchDriver={}, orientation={}",
-                resolvedDisplay, resolvedTouch, options.orientation);
+            // options.orientation is null unless --orientation was passed explicitly — the
+            // normal case derives it from the selected display's own fixed physical mounting
+            // orientation (DisplayDriverFactory.physicalOrientation()), the single owned source
+            // for this fact. The explicit override remains for drivers with no such fixed
+            // orientation (e.g. --display png).
+            Orientation orientation = options.orientation != null
+                ? options.orientation
+                : displayFactory.physicalOrientation();
 
-            DriverConfig config = createDriverConfig(options, touchI2cAddress);
+            log.info("HardwareValidationTest: displayDriver={}, touchDriver={}, orientation={}",
+                resolvedDisplay, resolvedTouch, orientation);
+
+            DriverConfig config = createDriverConfig(options, orientation, touchI2cAddress);
 
             display = displayFactory.create(ctx, config);
             touch = touchFactory.create(ctx, config);
@@ -90,7 +99,7 @@ public final class HardwareValidationTest {
             int framebufferWidth = display.getWidth();
             int framebufferHeight = display.getHeight();
 
-            var orientationMapping = OrientationMapping.of(framebufferWidth, framebufferHeight, options.orientation);
+            var orientationMapping = OrientationMapping.of(framebufferWidth, framebufferHeight, orientation);
             int logicalWidth = orientationMapping.logicalWidth();
             int logicalHeight = orientationMapping.logicalHeight();
 
@@ -278,9 +287,9 @@ public final class HardwareValidationTest {
         log.info("PHASE instruction-wait: tap received after prompt");
     }
 
-    private static DriverConfig createDriverConfig(Options options, int touchI2cAddress) {
+    private static DriverConfig createDriverConfig(Options options, Orientation orientation, int touchI2cAddress) {
         return DriverConfig.builder()
-            .property("orientation", options.orientation.name())
+            .property("orientation", orientation.name())
             .property("dcPin", options.dcPin)
             .property("rstPin", options.rstPin)
             .property("busyPin", options.busyPin)
@@ -307,7 +316,9 @@ public final class HardwareValidationTest {
         private static Options parse(String[] args) {
             String displayDriver = null;
             String touchDriver = null;
-            Orientation orientation = Orientation.LANDSCAPE;
+            // null means "derive from the selected display's physicalOrientation()"; only
+            // drivers with no fixed physical orientation (e.g. png) require --orientation.
+            Orientation orientation = null;
             int dcPin = 25;
             int rstPin = 17;
             int busyPin = 24;

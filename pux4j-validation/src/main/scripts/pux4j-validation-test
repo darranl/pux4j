@@ -133,5 +133,4 @@ fi
 
 exec java -Xmx192m "${JAVA_OPTS[@]}" \
   -m dev.pux4j.ui.validation/dev.pux4j.ui.validation.HardwareValidationTest \
-  "$DISPLAY_DRIVER" "$TOUCH_DRIVER" \
-  --orientation @dist.orientation@ 2>&1 | tee "$LOG_FILE"
+  "$DISPLAY_DRIVER" "$TOUCH_DRIVER" 2>&1 | tee "$LOG_FILE"

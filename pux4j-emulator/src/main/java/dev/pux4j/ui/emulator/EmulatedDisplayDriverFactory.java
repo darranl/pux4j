@@ -4,6 +4,7 @@ package dev.pux4j.ui.emulator;
 import dev.pux4j.ui.core.DisplayDriverFactory;
 import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.EInkDisplayDriver;
+import dev.pux4j.ui.core.Orientation;
 import dev.pux4j.ui.core.Pux4jContext;
 import javafx.application.Platform;
 import javafx.stage.Stage;
@@ -46,9 +47,23 @@ public final class EmulatedDisplayDriverFactory implements DisplayDriverFactory 
     public boolean isAvailable() { return true; }
 
     @Override
-    public EInkDisplayDriver create(Pux4jContext context, DriverConfig config) {
-        EmulatorDisplayProfile profile = EmulatorDisplayProfile.forName(
+    public Orientation physicalOrientation() {
+        return selectedProfile().orientation;
+    }
+
+    /**
+     * The profile selected by the {@code pux4j.emulator.display} system property — the single
+     * place this factory reads that property, so {@link #create} and {@link #physicalOrientation}
+     * can never disagree about which profile is selected.
+     */
+    private static EmulatorDisplayProfile selectedProfile() {
+        return EmulatorDisplayProfile.forName(
             System.getProperty("pux4j.emulator.display", "ssd1675a"));
+    }
+
+    @Override
+    public EInkDisplayDriver create(Pux4jContext context, DriverConfig config) {
+        EmulatorDisplayProfile profile = selectedProfile();
         int scale = Integer.parseInt(System.getProperty("pux4j.emulator.scale", "3"));
 
         log.debug("Creating emulated display: profile={} scale={}", profile.profileName, scale);

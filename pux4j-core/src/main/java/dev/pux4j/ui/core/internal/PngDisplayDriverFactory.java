@@ -26,4 +26,11 @@ public final class PngDisplayDriverFactory implements DisplayDriverFactory {
         String outputDir = config.property("outputDir", "target/png-frames");
         return new PngEInkDisplay(width, height, orientation, outputDir);
     }
+
+    /** The PNG renderer has no physical mounting; callers must supply orientation explicitly
+     * via the {@code DriverConfig} "orientation" property instead (see {@link #create}). */
+    @Override
+    public Orientation physicalOrientation() {
+        throw new UnsupportedOperationException(NAME + " has no fixed physical orientation; supply one explicitly");
+    }
 }

@@ -59,14 +59,12 @@ case "$PROFILE" in
     PROFILE_ARGS=(
       --display ssd1675a
       --touch icnt86x
-      --orientation LANDSCAPE
     )
     ;;
   little-2in13)
     PROFILE_ARGS=(
       --display ssd1680
       --touch gt1151q
-      --orientation LANDSCAPE_INVERTED
     )
     ;;
   custom)

@@ -36,25 +36,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# ORIENTATION must match each profile's real hardware orientation exactly (see
-# dist-hat-2in9v2/dist-hat-2in13v4 in pux4j-validation/pom.xml) — Canvas builds content in
-# this orientation's coordinate space, and EmulatorDisplayProfile (pux4j-emulator) renders
-# assuming the same. Getting this wrong doesn't crash — it silently renders content rotated
-# 180 degrees from correct (found 2026-08-30 checking the ssd1680 profile specifically:
-# HardwareValidationTest's own '--orientation' default of LANDSCAPE was always used here,
-# never overridden per profile).
-# Touch calibration is no longer passed here at all — EmulatedTouchDriverFactory reports its
-# own identity calibration matching whichever display is selected (see TouchDriverFactory
-# .touchCalibration in pux4j-core), so there is nothing left for this script to get out of
-# sync with the display profile.
-case "$DISPLAY_PROFILE" in
-  ssd1675a) ORIENTATION="LANDSCAPE" ;;
-  ssd1680)  ORIENTATION="LANDSCAPE_INVERTED" ;;
-  *)
-    echo "ERROR: Unknown display profile '$DISPLAY_PROFILE'. Valid: ssd1675a, ssd1680"
-    exit 1
-    ;;
-esac
+# Orientation is no longer passed here at all — HardwareValidationTest derives it from
+# DisplayDriverFactory.physicalOrientation(), and EmulatedDisplayDriverFactory reports the
+# selected $DISPLAY_PROFILE's own orientation (EmulatorDisplayProfile), so there is nothing
+# left for this script to get out of sync with the display profile. This used to duplicate
+# that fact in a case statement here — found responsible for a real 180-degree-rotated-render
+# bug on 2026-08-30 when it went untested for the ssd1680 profile.
+# Touch calibration is likewise not passed here — EmulatedTouchDriverFactory reports its own
+# identity calibration matching whichever display is selected (see TouchDriverFactory
+# .touchCalibration in pux4j-core).
+if [[ "$DISPLAY_PROFILE" != "ssd1675a" && "$DISPLAY_PROFILE" != "ssd1680" ]]; then
+  echo "ERROR: Unknown display profile '$DISPLAY_PROFILE'. Valid: ssd1675a, ssd1680"
+  exit 1
+fi
 
 require_artifacts() {
   local ok=1
@@ -76,5 +70,4 @@ java \
   --add-modules dev.pux4j.ui.emulator \
   --enable-native-access=javafx.graphics,com.pi4j.plugin.ffm \
   -m dev.pux4j.ui.validation/dev.pux4j.ui.validation.HardwareValidationTest \
-  --orientation "$ORIENTATION" \
   "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}"

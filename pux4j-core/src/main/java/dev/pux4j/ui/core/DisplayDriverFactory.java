@@ -62,4 +62,22 @@ public interface DisplayDriverFactory {
      * @return a new driver instance
      */
     EInkDisplayDriver create(Pux4jContext context, DriverConfig config);
+
+    /**
+     * Returns this display's fixed physical mounting orientation — the panel's real,
+     * bonded-at-manufacture orientation relative to its chip's native (portrait) framebuffer.
+     * Mirrors {@link TouchDriverFactory#touchCalibration}: a fixed hardware fact owned by the
+     * factory rather than supplied separately by every caller, which is what previously let it
+     * drift out of sync across build profiles, launcher scripts, and test defaults.
+     *
+     * <p>A real hardware driver or the emulator returns a fixed constant. Deliberately not a
+     * default method: a driver with no single fixed physical orientation (e.g. the PNG
+     * renderer, which has no physical mounting at all) must say so explicitly by throwing
+     * {@link UnsupportedOperationException} itself, so a new driver that forgets this method
+     * entirely fails to compile rather than failing at runtime on hardware.
+     *
+     * @return this display's fixed physical mounting orientation
+     * @throws UnsupportedOperationException if this driver has no fixed physical orientation
+     */
+    Orientation physicalOrientation();
 }

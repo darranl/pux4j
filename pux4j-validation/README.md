@@ -96,18 +96,19 @@ Profiles:
 - pi500-2in9 (default):
   - display=ssd1675a
   - touch=icnt86x
-  - orientation=LANDSCAPE
 - little-2in13:
   - display=ssd1680
   - touch=gt1151q
-  - orientation=LANDSCAPE_INVERTED
 - custom:
   - no preset arguments (you pass everything)
 
-Touch calibration (native resolution, axis flips/swap) is not a run argument at all — each
-touch driver reports its own fixed calibration for the panel it's bonded to (see
-`TouchDriverFactory.touchCalibration` in `pux4j-core`), so there is nothing to pass or get
-out of sync here.
+Orientation (physical mounting: `LANDSCAPE` vs `LANDSCAPE_INVERTED`) and touch calibration
+(native resolution, axis flips/swap) are not run arguments at all — each display driver
+reports its own fixed physical orientation (see `DisplayDriverFactory.physicalOrientation`)
+and each touch driver reports its own fixed calibration for the panel it's bonded to (see
+`TouchDriverFactory.touchCalibration`), both in `pux4j-core`, so there is nothing to pass or
+get out of sync here. `--orientation` remains available as an explicit override for drivers
+with no fixed physical orientation (e.g. `--display png`) — see the `custom` example below.
 
 Examples:
 ```bash
