@@ -17,14 +17,17 @@ import dev.pux4j.ui.transform.RenderOptions;
 import dev.pux4j.ui.transform.RenderResult;
 import dev.pux4j.ui.transform.RenderSession;
 import dev.pux4j.ui.transform.TransformStrategy;
+import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
 import javafx.event.Event;
 import javafx.event.EventType;
 import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.image.WritableImage;
 import javafx.scene.input.MouseButton;
 import javafx.scene.input.MouseEvent;
 import javafx.scene.input.PickResult;
+import javafx.scene.paint.Color;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,6 +44,8 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * JavaFX bridge entry point. Wires a stage-less JavaFX {@code Scene} to an
@@ -58,11 +63,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@code create()} itself runs on the FX thread). {@code Application.init()} is the intended
  * call site.
  *
- * <p>{@link #start(Scene)}/{@link #stop()} and the display/touch virtual threads are
- * implemented in this phase (Phase 6.4 part B). Scene capture (the {@code AnimationTimer}
- * that actually produces frames) and {@code requestRefresh()}/{@code forceRefresh()} remain
- * Phase 6.4 part C — until then, nothing calls {@link #submitRenderWork(MemorySegment)}, so
- * the display thread runs but stays idle, and only touch injection is externally observable.
+ * <p>{@link #start(Scene)}/{@link #stop()}, the display/touch virtual threads (Phase 6.4 part
+ * B), and timer/application-driven scene capture with a two-buffer free list (Phase 6.4 part
+ * C — {@link #requestRefresh()}, {@link #forceRefresh()}) are all implemented. See the Scene
+ * Capture and Threading sections of the design doc, and the 2026-09-22 (design) and 2026-09-24
+ * (implementation) Opus reviews of this phase (findings C1-C12 and I1-I9) for the reasoning
+ * behind the free-list recycling, the {@code resetRequestedSeq}/{@code refreshPending} latches,
+ * and the FX-thread assertion in {@link #start(Scene)}.
  */
 public final class EInkBridge {
 
@@ -93,11 +100,136 @@ public final class EInkBridge {
 
     /**
      * True while the display thread is actually writing to the driver (between submitting
-     * writeFrame()/writeRegion() and its future completing) — the backpressure signal Phase C's
-     * AnimationTimer reads before snapshotting again. Deliberately narrower than "queue
-     * non-empty": an unchanged frame (session.prepare() returns empty) never sets this.
+     * writeFrame()/writeRegion() and its future completing). Diagnostic/test hook only — per
+     * the 2026-09-22 Opus review (finding C3), this is deliberately NOT used as capture
+     * backpressure: it is set only after {@code session.prepare()}'s packing/diff work has
+     * already run, so {@code !writeInFlight} is not "display thread idle". {@link #freeBuffers}
+     * being non-empty is the actual backpressure signal — see {@link #maybeCapture}.
      */
     private final AtomicBoolean writeInFlight = new AtomicBoolean(false);
+
+    /**
+     * Reusable capture destination for {@code scene.snapshot(...)} — sized once, at
+     * construction, from {@link #orientationMapping}'s logical dimensions (never from the
+     * {@code Scene} passed to {@link #start}, which is merely validated against it — see
+     * {@link #start}). Read and written only from the FX thread (inside {@link #maybeCapture}).
+     */
+    private final WritableImage captureImage;
+
+    /**
+     * Two-entry free list of pixel buffers cycled between the FX thread (fills one per
+     * capture) and the display thread (returns one after {@link #processRenderWork} finishes
+     * with it, via {@link #recycle}) — see the design doc's Pixel handoff section. Each
+     * {@link CaptureBuffer} pairs a {@code byte[]} with a {@code MemorySegment} created once
+     * over that same array ({@link MemorySegment#ofArray}), so no segment is ever built from a
+     * {@code ByteBuffer}'s position/limit (2026-09-22 Opus review finding C9). Capacity 2 is
+     * also the sole capture backpressure signal (C3): {@link #maybeCapture} skips a tick
+     * entirely when {@code poll()} returns {@code null} rather than consulting
+     * {@link #writeInFlight}.
+     */
+    private final BlockingQueue<CaptureBuffer> freeBuffers = new ArrayBlockingQueue<>(2);
+
+    /**
+     * FX-thread-only write (bumped in {@link #maybeCapture} immediately before each successful
+     * capture), so every {@link RenderWork} that ever reaches the display thread carries a
+     * strictly increasing generation number. {@code volatile} so {@link #forceRefresh} (callable
+     * from any thread) can read a fresh value. Starts at 1 so 0 can mean "no forced reset
+     * outstanding" in {@link #resetRequestedSeq}.
+     */
+    private volatile long nextCaptureSeq = 1L;
+
+    /**
+     * Set by {@link #forceRefresh()} to {@link #nextCaptureSeq}'s value at call time — i.e. the
+     * generation number of the next capture that hasn't started yet. Consumed by
+     * {@link #processRenderWork}, which calls {@code session.reset()} — the only thread allowed
+     * to touch the not-thread-safe {@link RenderSession} — only for a {@link RenderWork} whose
+     * own {@code captureSeq()} is {@code >=} this value.
+     *
+     * <p>Originally a plain {@code AtomicBoolean} consumed unconditionally by the next frame the
+     * display thread happened to process. That was wrong in two ways later found by the
+     * 2026-09-24 Opus implementation review: (finding I4) a frame already in flight or queued
+     * *before* {@code forceRefresh()} was called could consume the flag, so the ghost-clearing
+     * {@code FULL} write would land on stale content instead of the newly forced capture — which
+     * defeats the documented post-{@code sleep()}/{@code wake()} use case entirely; (finding I5)
+     * if {@code session.reset()} itself threw, the flag had already been cleared and the force
+     * request was lost with no {@code FULL} ever issued. The generation number fixes both: a
+     * pre-existing frame's {@code captureSeq()} is always less than a value read from
+     * {@link #nextCaptureSeq} after it was captured, so it can never satisfy the request; and
+     * {@link #processRenderWork} clears this (via {@code compareAndSet}, so a newer concurrent
+     * {@code forceRefresh()} request is never clobbered) only *after* {@code session.reset()}
+     * returns successfully, not before.
+     *
+     * <p>Still deliberately bridge-level rather than a per-{@link RenderWork} field: the render
+     * queue is "latest wins" ({@link #offerReplacing}), so a flag carried on the work item
+     * itself could be silently discarded if a forced capture is displaced by a later non-forced
+     * one before the display thread takes it (2026-09-22 Opus review finding C2) — the
+     * generation number sidesteps that the same way the boolean did, by living on the bridge and
+     * being checked against *whichever* work item the display thread next actually processes.
+     */
+    private final AtomicLong resetRequestedSeq = new AtomicLong(0);
+
+    /**
+     * Set by {@link #requestRefresh()}/{@link #forceRefresh()}; cleared by {@link #maybeCapture}
+     * only for the specific attempt it was set for — see that method's javadoc on the
+     * "observed-before-snapshot" sampling this requires (2026-09-24 Opus implementation review
+     * finding I6: clearing it unconditionally after *any* successful capture, including an
+     * unrelated timer tick whose snapshot predates the request, could drop a concurrently-issued
+     * request with nothing left to retry it). If every attempt is skipped (e.g. the display
+     * thread is mid-write when the buffer it holds is the only one free), {@link
+     * #processRenderWork} re-arms a retry via {@link #retryPendingCapture} once it returns a
+     * buffer to {@link #freeBuffers} — without this, a caller using {@code
+     * captureIntervalMs(0)} (manual-only capture, no timer) could have a refresh request
+     * silently dropped forever (2026-09-22 Opus review finding C1).
+     */
+    private final AtomicBoolean refreshPending = new AtomicBoolean(false);
+
+    /** How many consecutive capture ticks have been skipped for want of a free buffer — see
+     * {@link #recordCaptureSkipped}. Escalates from DEBUG to a one-time WARN so a leaked/never-
+     * returned buffer (finding C4) is distinguishable from ordinary brief saturation. */
+    private final AtomicInteger consecutiveBufferStarvations = new AtomicInteger();
+
+    private static final int BUFFER_STARVATION_WARN_THRESHOLD = 10;
+
+    /** FX-thread-only (read/written exclusively inside {@link #maybeCapture}, which always
+     * runs there — see that method's javadoc). Compared against {@code System.nanoTime()},
+     * never an {@code AnimationTimer.handle(long)} timestamp: that clock substitutes a
+     * synthetic counter under {@code -Djavafx.animation.fixedPulseLength}, which would make it
+     * disagree with the {@code System.nanoTime()} a cross-thread {@code requestRefresh()} call
+     * would otherwise have to use (2026-09-22 Opus review finding C8). Meaningless until
+     * {@link #hasCaptured} is {@code true} — see that field's javadoc for why a sentinel value
+     * here (the original approach) doesn't work. */
+    private volatile long lastCaptureNanos;
+
+    /**
+     * Guards the interval check in {@link #maybeCapture} against comparing {@link
+     * #lastCaptureNanos} before it holds a real timestamp. The original implementation used
+     * {@code Long.MIN_VALUE} as a "never captured yet" sentinel and relied on
+     * {@code now - lastCaptureNanos} always being large — but {@code System.nanoTime()} is
+     * positive (JVM-uptime-relative on Linux/HotSpot), so that subtraction overflows a signed
+     * {@code long} and wraps to a large *negative* number, making {@code < intervalNanos} true
+     * unconditionally. The result: with the sentinel approach, the very first capture never
+     * happened — {@code maybeCapture} skipped every timer tick forever, since only a successful
+     * capture (which requires passing the gate) ever advances {@code lastCaptureNanos} into a
+     * safe range (2026-09-24 Opus implementation review finding I1). A plain boolean sidesteps
+     * the arithmetic entirely: the interval check only runs once a real timestamp exists.
+     */
+    private volatile boolean hasCaptured;
+
+    /**
+     * Timer-driven capture — see {@link #maybeCapture}. Registering/unregistering an
+     * {@code AnimationTimer} off the FX thread is delegated asynchronously by JavaFX itself
+     * (its own javadoc says so), so {@link #start} asserts the FX thread precisely so this
+     * timer's registration is synchronous and {@link #stop}'s shutdown ordering (null the
+     * {@code scene} field before tearing down the driver) is a real guard against a
+     * still-in-flight {@code handle()} call, not just a convention (2026-09-22 Opus review
+     * finding C7).
+     */
+    private final AnimationTimer captureTimer = new AnimationTimer() {
+        @Override
+        public void handle(long now) {
+            maybeCapture(false);
+        }
+    };
 
     /**
      * Per-contact touch state (pressed node, press position, last known position). Read and
@@ -124,6 +256,27 @@ public final class EInkBridge {
     private volatile Thread touchThread;
     private volatile boolean stopped;
 
+    /**
+     * Set right after {@link #captureTimer}{@code .start()} in {@link #start}; guards the
+     * matching {@code .stop()} call in {@link #stop}. Needed because an off-FX-thread call to
+     * {@code AnimationTimer.start()}/{@code .stop()} is delegated to the FX thread via {@code
+     * Platform.runLater(...)}, which throws {@code IllegalStateException("Toolkit not
+     * initialized")} if the toolkit was never started ({@code PlatformImpl.runLater}) — without
+     * this flag, {@link #stop} on a bridge whose {@link #start} was never called (a supported,
+     * tested case — see {@code
+     * EInkBridgeDisplayThreadTest#stop_withoutEverStarting_doesNotThrowAndIsIdempotent}) would
+     * fail even though this test suite deliberately never starts the FX toolkit (Q7/Q8 in the
+     * design doc). (An earlier version of this javadoc attributed the throw to the
+     * {@code AnimationTimer} constructor's own {@code Toolkit.getToolkit()} call instead —
+     * wrong: that call succeeds even without a started toolkit, and runs anyway in every
+     * {@code EInkBridge} this test suite builds, evidenced by all of {@code pux4j-fx}'s tests
+     * passing without ever starting one. The actual thrower is specifically the off-FX-thread
+     * {@code runLater} delegation, which is exactly why this flag — rather than, say, a
+     * toolkit-initialised check — is the correct guard: 2026-09-24 Opus implementation review
+     * finding I7c.)
+     */
+    private volatile boolean captureTimerStarted;
+
     private EInkBridge(
             Pux4jContext context,
             EInkDisplayDriver display,
@@ -139,6 +292,30 @@ public final class EInkBridge {
         this.orientationMapping = orientationMapping;
         this.session = session;
         this.captureIntervalMs = captureIntervalMs;
+
+        int w = orientationMapping.logicalWidth();
+        int h = orientationMapping.logicalHeight();
+        this.captureImage = new WritableImage(w, h);
+        int bufferSize = w * 4 * h;
+        this.freeBuffers.add(newCaptureBuffer(bufferSize));
+        this.freeBuffers.add(newCaptureBuffer(bufferSize));
+    }
+
+    /**
+     * One pixel buffer in {@link #freeBuffers}: a {@code byte[]} plus a {@link MemorySegment}
+     * built once, over that same array, at allocation time — never re-derived from a
+     * {@code ByteBuffer}'s position/limit (2026-09-22 Opus review finding C9, which also notes
+     * this lets capture use {@link javafx.scene.image.PixelReader}'s array-based
+     * {@code getPixels} overload rather than the generic {@code Buffer} one). Package-private
+     * (not {@code private}) so tests can build a buffer-carrying {@link RenderWork} directly and
+     * exercise free-list recycling without a real scene snapshot — see
+     * {@code EInkBridgeCaptureTest} (2026-09-24 Opus implementation review §4).
+     */
+    record CaptureBuffer(byte[] pixels, MemorySegment segment) {}
+
+    static CaptureBuffer newCaptureBuffer(int sizeBytes) {
+        byte[] pixels = new byte[sizeBytes];
+        return new CaptureBuffer(pixels, MemorySegment.ofArray(pixels));
     }
 
     // -------------------------------------------------------------------------
@@ -528,37 +705,92 @@ public final class EInkBridge {
     private static final long DISPLAY_DRAIN_TIMEOUT_MS = 5_000L;
 
     /**
-     * Starts the display and touch virtual threads against the given (already correctly
-     * sized — see {@link #displayWidth()}/{@link #displayHeight()}) stage-less {@code Scene}.
-     * The touch thread is only started if a touch driver was wired. Timer-driven capture is
-     * Phase 6.4 part C — until then the display thread runs but has nothing to consume unless
-     * a test calls {@link #submitRenderWork(MemorySegment)} directly.
+     * Starts the display and touch virtual threads, and (if {@code captureIntervalMs > 0})
+     * timer-driven capture, against the given stage-less {@code Scene}. The touch thread is
+     * only started if a touch driver was wired.
+     *
+     * <p>Must run on the JavaFX application thread. This is required anyway — {@code
+     * Scene.snapshot()} asserts it internally — but it is also what makes the {@code
+     * AnimationTimer}'s {@code start()} call (inside this method) register synchronously
+     * rather than being delegated asynchronously by JavaFX, which is what lets {@link #stop}'s
+     * shutdown ordering (null {@code scene} before tearing down the driver) actually guard
+     * against a capture that is still in flight (2026-09-22 Opus review finding C7).
+     *
+     * <p>Also validates that {@code scene} was constructed at exactly
+     * {@link #displayWidth()}/{@link #displayHeight()} (a mismatched size is silently
+     * cropped/padded by {@code Scene.snapshot()}, not rejected — finding C10) and that its
+     * fill is fully opaque ({@link dev.pux4j.ui.transform}'s pixel transform ignores alpha, so
+     * a transparent fill renders as black on the panel — finding C11).
      *
      * <p>Not safe to call concurrently with itself or {@link #stop()} from another thread —
      * the bridge's lifecycle is expected to be driven from one place (typically
      * {@code Application.start()}/{@code Application.stop()}), not raced.
      *
-     * @throws IllegalStateException if already started, or if called after {@link #stop()}
-     *         (restarting a stopped bridge would run threads against a driver that has
-     *         already been put to sleep/closed)
+     * @throws IllegalStateException if not called on the FX application thread, if already
+     *         started, or if called after {@link #stop()} (restarting a stopped bridge would
+     *         run threads against a driver that has already been put to sleep/closed)
+     * @throws IllegalArgumentException if {@code scene}'s size does not match
+     *         {@link #displayWidth()}/{@link #displayHeight()}
      */
     public void start(Scene scene) {
         Objects.requireNonNull(scene, "scene");
+        if (!Platform.isFxApplicationThread()) {
+            throw new IllegalStateException(
+                    "EInkBridge.start(Scene) must run on the JavaFX application thread "
+                    + "(e.g. Application.start()) — scene capture requires it, and it is also "
+                    + "what makes the capture timer's registration synchronous with this call.");
+        }
         if (stopped) {
             throw new IllegalStateException("EInkBridge already stopped — not restartable");
         }
         if (displayThread != null) {
             throw new IllegalStateException("EInkBridge already started");
         }
+        int sceneWidth = (int) Math.round(scene.getWidth());
+        int sceneHeight = (int) Math.round(scene.getHeight());
+        if (sceneWidth != displayWidth() || sceneHeight != displayHeight()) {
+            throw new IllegalArgumentException(
+                    "Scene is " + sceneWidth + "x" + sceneHeight + " but the display is "
+                    + displayWidth() + "x" + displayHeight() + " — construct the Scene at "
+                    + "bridge.displayWidth()/displayHeight(); EInkBridge cannot resize it");
+        }
+        warnIfFillNotOpaque(scene);
+
         this.scene = scene;
         activeContacts.clear();
         hasActiveContacts.set(false);
+        hasCaptured = false;
 
         displayThread = Thread.ofVirtual().name("eink-display").start(this::runDisplayLoop);
         if (touchDriver != null) {
             touchThread = Thread.ofVirtual().name("eink-touch").start(this::runTouchLoop);
         }
-        LOG.info("EInkBridge started (touch {})", touchDriver != null ? "enabled" : "disabled");
+        if (captureIntervalMs > 0) {
+            captureTimer.start();
+            captureTimerStarted = true;
+        }
+        LOG.info("EInkBridge started (touch {}, capture {})",
+                touchDriver != null ? "enabled" : "disabled",
+                captureIntervalMs > 0 ? captureIntervalMs + "ms" : "manual (requestRefresh only)");
+    }
+
+    /**
+     * Logs a WARN if {@code scene}'s fill is a non-opaque (or non-{@link Color}) paint — see
+     * {@link #start}'s javadoc on why alpha is otherwise silently mishandled. Best-effort: an
+     * unrecognised {@code Paint} implementation can't be checked for opacity, so it only warns
+     * that it couldn't check, rather than failing the whole {@link #start} call over it.
+     */
+    private static void warnIfFillNotOpaque(Scene scene) {
+        var fill = scene.getFill();
+        if (fill instanceof Color color) {
+            if (color.getOpacity() < 1.0) {
+                LOG.warn("Scene fill {} is not fully opaque; pixel transforms ignore alpha, so "
+                        + "transparent areas will render as black on the eInk panel", color);
+            }
+        } else if (fill != null) {
+            LOG.warn("Scene fill {} is not a Color; cannot verify it is fully opaque — pixel "
+                    + "transforms ignore alpha, so a transparent fill would render as black", fill);
+        }
     }
 
     /**
@@ -578,12 +810,41 @@ public final class EInkBridge {
      * poison-pill work item displaces anything queued (same "latest wins" replace {@link
      * #submitRenderWork} already uses) and the thread is joined with a bounded timeout,
      * falling back to interrupt only if a write appears to be stuck.
+     *
+     * <p>Deliberately NOT asserted to run on the FX thread (unlike {@link #start}) — it must
+     * stay callable from wherever {@link #start} was never reached (e.g. driver construction
+     * succeeded but the application is shutting down before showing anything). Because of
+     * that, {@link #captureTimer}{@code .stop()} below may be delegated asynchronously by
+     * JavaFX rather than taking effect immediately (see {@link #start}'s javadoc and
+     * 2026-09-22 Opus review finding C7), so {@code scene} is set to {@code null} as the very
+     * first thing this method does (before even {@code captureTimer.stop()}), not merely before
+     * driver teardown — a capture that is still in flight when {@code stop()} is called (a
+     * queued {@code AnimationTimer.handle()}, or a racing {@code requestRefresh()}/
+     * {@code forceRefresh()} {@code runLater}) sees the null scene in {@link #maybeCapture} and
+     * becomes a no-op. This also closes the window a capture-only guard can't:
+     * {@link #offerReplacing} separately refuses to let any ordinary capture displace the
+     * poison pill once it is queued, since a capture racing the FX-thread scheduling delay
+     * above could otherwise still queue itself *after* the pill and bump it out — see that
+     * method's javadoc (2026-09-24 Opus implementation review finding I3, which found the
+     * original ordering here protected driver teardown but not this queue race).
      */
     public void stop() {
         if (stopped) {
             return;
         }
         stopped = true;
+        // Moved ahead of captureTimer.stop()/the poison-pill hand-off below (2026-09-24 Opus
+        // implementation review finding I3): captureTimer.stop() can be delegated
+        // asynchronously if this thread isn't the FX thread (see this method's javadoc), so a
+        // capture already in flight — or one still queued behind it before the timer actually
+        // stops — must be stopped by maybeCapture's own guards, not by assuming the timer is
+        // already off. Nulling scene here, before anything else, is what actually makes that
+        // guard effective for the whole rest of this method, not just driver teardown.
+        scene = null;
+
+        if (captureTimerStarted) {
+            captureTimer.stop();
+        }
 
         if (touchThread != null) {
             touchThread.interrupt();
@@ -600,7 +861,6 @@ public final class EInkBridge {
             }
             displayThread = null;
         }
-        scene = null;
 
         try {
             display.sleep();
@@ -641,53 +901,131 @@ public final class EInkBridge {
     // -------------------------------------------------------------------------
 
     /**
-     * One captured frame handed from the FX thread to the display thread. Package-private
+     * One captured frame handed from the FX thread to the display thread. {@code buffer} is
+     * the {@link CaptureBuffer} that owns {@code bgra}'s backing array, so
+     * {@link #processRenderWork}/{@link #recycle} can return it to {@link #freeBuffers} once
+     * consumed — {@code null} for work built via the single- or two-argument constructors
+     * (tests, and {@link #submitRenderWork(MemorySegment)}'s external callers), which isn't
+     * drawn from the free list and so has nothing to recycle. {@code captureSeq} is {@link
+     * #nextCaptureSeq}'s value at the moment this work was captured — {@code 0} (never a real
+     * capture's value, which starts at 1) for the same test/external-caller constructors, so
+     * they can never accidentally satisfy a {@link #resetRequestedSeq} check. Package-private
      * (not {@code private}) so tests can construct one directly and drive
      * {@link #processRenderWork} without going through a real scene snapshot — snapshotting
-     * needs a live {@code Scene}, which (see {@link #injectTouches}'s javadoc) needs the
-     * JavaFX toolkit started, which this codebase deliberately doesn't require of its test
-     * suite (Q7/Q8 in the design doc — no headless Glass platform until JavaFX 26).
+     * needs a live {@code Scene}, which (see {@link #injectTouches}'s javadoc) needs the JavaFX
+     * toolkit started, which this codebase deliberately doesn't require of its test suite
+     * (Q7/Q8 in the design doc — no headless Glass platform until JavaFX 26).
+     *
+     * <p><b>Compare by reference (`==`), never `.equals()`.</b> As a record, {@code equals()} is
+     * value-based, and both {@code MemorySegment} (heap-backed, over the same array) and this
+     * whole record can compare equal across two distinct instances built from equivalent
+     * arguments — including, e.g., {@code new RenderWork(null, null, 0).equals(POISON_PILL)}
+     * being {@code true}. Nothing today calls {@code .equals()}/{@code .contains()} on a
+     * {@code RenderWork} ({@link #runDisplayLoop} uses {@code ==} at the poison-pill check), but
+     * a future {@code Collection}-based use of one would silently match the sentinel
+     * (2026-09-24 Opus implementation review finding I8).
      */
-    record RenderWork(MemorySegment bgra) {}
+    record RenderWork(MemorySegment bgra, CaptureBuffer buffer, long captureSeq) {
+        RenderWork(MemorySegment bgra) {
+            this(bgra, null, 0);
+        }
+
+        RenderWork(MemorySegment bgra, CaptureBuffer buffer) {
+            this(bgra, buffer, 0);
+        }
+    }
 
     /**
      * Sentinel {@link RenderWork} used only to unblock {@link #runDisplayLoop}'s
      * {@code renderQueue.take()} during {@link #stop()} — checked by reference identity, never
      * passed to {@link #processRenderWork} (its {@code null} {@code bgra} would NPE there).
      */
-    private static final RenderWork POISON_PILL = new RenderWork(null);
+    private static final RenderWork POISON_PILL = new RenderWork(null, null, 0);
 
     /**
      * "Latest wins" replace: drops whatever is currently queued (if anything) and queues
-     * {@code work} in its place — capacity-1 queue, {@code poll()} then {@code offer()}. Safe
-     * with exactly one producer (the caller), which both {@link #submitRenderWork} and
-     * {@link #stop}'s poison-pill hand-off are.
+     * {@code work} in its place — capacity-1 queue, {@code poll()} then {@code offer()}.
+     * {@code synchronized} because Phase 6.4 part C has two producers — captures from the FX
+     * thread and {@link #stop()}'s poison-pill hand-off, which can run from any thread (it is
+     * deliberately not FX-thread-asserted; see {@link #stop}'s javadoc) — and an interleaved
+     * poll()/offer() pair from each could otherwise drop one producer's item silently (the
+     * capacity-1 queue's second {@code offer()} would just return {@code false}), which for a
+     * dropped poison pill would make {@link #stop()} block its full drain timeout and then
+     * interrupt a thread that was never actually stuck (2026-09-22 Opus review finding C5).
      *
-     * @return the displaced item, or {@code null} if the queue was empty
+     * <p>Also owns free-list recycling for whatever this call displaces (finding C5/C6): a
+     * displaced item's {@link CaptureBuffer}, if it has one, goes straight back to
+     * {@link #freeBuffers} here rather than at each of this method's call sites, so that rule
+     * can't be missed by a future caller the way {@link #stop}'s old poison-pill call used to
+     * silently drop it.
+     *
+     * <p><b>Never displaces an already-queued {@link #POISON_PILL}</b> (2026-09-24 Opus
+     * implementation review finding I3): {@code synchronized} alone only fixes a torn
+     * poll()/offer() pair between the two producers — it does nothing to stop an ordinary
+     * capture from legitimately displacing the pill *after* it was queued, since displacement is
+     * exactly what "latest wins" is supposed to do. A displaced pill has no {@link CaptureBuffer}
+     * (see {@link #recycle}), so it would simply vanish, and {@link #stop()} would then block its
+     * full {@code DISPLAY_DRAIN_TIMEOUT_MS} before falsely concluding the display thread was
+     * stuck. So: if the pill is already queued, any *other* work item offered here is refused
+     * (its buffer recycled immediately) rather than displacing it — {@link #stop()} is draining
+     * and nothing but the pill itself may occupy the queue from that point on.
+     *
+     * @return the displaced item, or {@code null} if the queue was empty or {@code work} was
+     *         refused because the pill is already queued
      */
-    private RenderWork offerReplacing(RenderWork work) {
+    private synchronized RenderWork offerReplacing(RenderWork work) {
+        if (work != POISON_PILL && renderQueue.peek() == POISON_PILL) {
+            recycle(work);
+            return null;
+        }
         RenderWork displaced = renderQueue.poll();
+        recycle(displaced);
         renderQueue.offer(work);
         return displaced;
     }
 
     /**
+     * Returns {@code work}'s {@link CaptureBuffer} (if it has one — see {@link RenderWork}'s
+     * javadoc) to {@link #freeBuffers}. Safe to call with {@code null} or {@link #POISON_PILL}.
+     */
+    private void recycle(RenderWork work) {
+        if (work != null && work.buffer() != null) {
+            freeBuffers.offer(work.buffer());
+        }
+    }
+
+    /**
      * Enqueues a captured frame for the display thread — "latest wins", see
-     * {@link #offerReplacing}. Package-private: the intended caller is Phase 6.4 part C's
-     * {@code AnimationTimer}/{@code requestRefresh()} machinery; exists now so the display
-     * thread's consume/prepare/write logic can be exercised directly, without needing a real
-     * scene snapshot.
+     * {@link #offerReplacing}. Package-private: exists so the display thread's
+     * consume/prepare/write logic can be exercised directly by tests, without needing a real
+     * scene snapshot. The bridge's own capture path ({@link #maybeCapture}) calls
+     * {@link #offerReplacing} directly with a buffer-carrying {@link RenderWork} instead of
+     * going through this method, since this overload's {@code MemorySegment}-only signature
+     * has no buffer to attach.
      *
-     * @return the previously-queued item this one replaced, or {@code null} if none — a caller
-     *         managing a pixel-buffer free list (Phase 6.4 part C) needs this to recycle that
-     *         buffer, since a displaced item is otherwise discarded and never comes back.
-     *         Note the other half of that problem isn't solved here: {@link #processRenderWork}
-     *         doesn't hand its own buffer back after use either, since nothing calls this
-     *         method in a way that needs it yet — Phase C will need its own mechanism for that
-     *         (e.g. a callback or a returned-buffer queue), not guessed at in advance here.
+     * @return the previously-queued item this one replaced, or {@code null} if none
      */
     RenderWork submitRenderWork(MemorySegment bgra) {
         return offerReplacing(new RenderWork(bgra));
+    }
+
+    /**
+     * As {@link #submitRenderWork(MemorySegment)}, but for a caller-built {@link RenderWork}
+     * (e.g. one carrying a {@link CaptureBuffer}, as {@link #maybeCapture} builds) — lets a test
+     * exercise {@link #offerReplacing}'s displacement/recycling behavior directly without a
+     * {@code Scene} (2026-09-24 Opus implementation review §4).
+     */
+    RenderWork submitRenderWork(RenderWork work) {
+        return offerReplacing(work);
+    }
+
+    /**
+     * Package-private — drains {@link #freeBuffers} to empty (discarding the buffers) so a test
+     * can start free-list recycling assertions from a known state (2026-09-24 Opus
+     * implementation review §4).
+     */
+    void drainFreeBuffersForTest() {
+        freeBuffers.clear();
     }
 
     /**
@@ -700,8 +1038,18 @@ public final class EInkBridge {
     }
 
     /**
-     * Package-private — the backpressure signal Phase 6.4 part C's {@code AnimationTimer}
-     * will read before snapshotting again.
+     * Package-private — queues {@link #POISON_PILL} exactly as {@link #stop()} does, without
+     * spinning up the threaded lifecycle, so a test can verify {@link #offerReplacing} refuses
+     * to let a subsequent {@link #submitRenderWork} displace it (2026-09-24 Opus implementation
+     * review finding I3).
+     */
+    void queuePoisonPillForTest() {
+        offerReplacing(POISON_PILL);
+    }
+
+    /**
+     * Package-private — a diagnostic/test hook, not the capture backpressure signal (see this
+     * flag's field javadoc for why — finding C3).
      */
     boolean isWriteInFlight() {
         return writeInFlight.get();
@@ -741,46 +1089,96 @@ public final class EInkBridge {
      * Transforms, diffs, and (if changed) writes one captured frame. Package-private, not
      * {@code private} — see {@link RenderWork}'s javadoc for why tests call this directly
      * instead of going through {@link #start(Scene)}'s real display thread.
+     *
+     * <p>Wrapped in an outer {@code try}/{@code finally} (not just around the write) so
+     * {@code work}'s {@link CaptureBuffer} is always returned to {@link #freeBuffers} —
+     * including on the "unchanged frame" path below, the most common one for an idle UI, and
+     * on {@code session.prepare()} throwing. A {@code finally} scoped only to the write (as an
+     * earlier draft had it) would starve the free list within two idle capture ticks
+     * (2026-09-22 Opus review finding C6). The same {@code finally} also re-arms a pending
+     * {@link #requestRefresh()}/{@link #forceRefresh()} that an earlier capture attempt had to
+     * skip for want of a free buffer — see {@link #refreshPending}'s javadoc (finding C1).
+     *
+     * <p>{@code session.reset()} — consuming {@link #resetRequestedSeq} — runs here, on the
+     * display thread, immediately before {@code session.prepare()}: {@link RenderSession} is
+     * documented not thread-safe, so this is the only place allowed to call either method
+     * (finding C2). Only cleared (via {@code compareAndSet}, so a newer concurrent
+     * {@code forceRefresh()} isn't clobbered) once {@code reset()} has actually returned — if it
+     * throws, the request survives for a later frame to retry rather than being silently lost
+     * (finding I5).
      */
     void processRenderWork(RenderWork work) {
-        Optional<RenderResult> result;
         try {
-            result = session.prepare(work.bgra());
-        } catch (RuntimeException e) {
-            LOG.error("RenderSession.prepare() failed; dropping frame", e);
-            return;
-        }
-        if (result.isEmpty()) {
-            return;
-        }
-        RenderResult r = result.get();
-        writeInFlight.set(true);
-        try {
-            // A driver may reject an out-of-range region or an unsupported FrameData/
-            // RefreshMode combination synchronously, before ever returning a future (e.g.
-            // Ssd1680DisplayDriver.writeRegion's coordinate validation) — that's a
-            // RuntimeException escaping this try, not something ExecutionException/
-            // InterruptedException below would catch, so it needs its own clause: one bad
-            // frame must not end the display thread for every frame after it.
-            CompletableFuture<Void> future = r.decision().region()
-                    .map(region -> display.writeRegion(
-                            region.x(), region.y(), region.width(), region.height(), r.frame()))
-                    .orElseGet(() -> display.writeFrame(r.frame()));
-            // Waits on this (display) thread, not the FX thread — per EInkDisplayDriver's
-            // threading contract, this is exactly what serialises writes one at a time.
-            future.get();
-        } catch (ExecutionException e) {
-            LOG.error("Display write failed", e.getCause());
-        } catch (InterruptedException e) {
-            // Only reachable via stop()'s timed-out fallback interrupt (the normal shutdown
-            // path drains via the poison pill instead, precisely to avoid abandoning a write
-            // mid-flight) — the driver's own write (on its internal virtual thread, per
-            // EInkDisplayDriver's contract) is not cancelled and completes on its own.
-            Thread.currentThread().interrupt();
-        } catch (RuntimeException e) {
-            LOG.error("Display write rejected", e);
+            long requiredSeq = resetRequestedSeq.get();
+            if (requiredSeq != 0 && work.captureSeq() >= requiredSeq) {
+                session.reset();
+                resetRequestedSeq.compareAndSet(requiredSeq, 0);
+            }
+
+            Optional<RenderResult> result;
+            try {
+                result = session.prepare(work.bgra());
+            } catch (RuntimeException e) {
+                LOG.error("RenderSession.prepare() failed; dropping frame", e);
+                return;
+            }
+            if (result.isEmpty()) {
+                return;
+            }
+            RenderResult r = result.get();
+            writeInFlight.set(true);
+            try {
+                // A driver may reject an out-of-range region or an unsupported FrameData/
+                // RefreshMode combination synchronously, before ever returning a future (e.g.
+                // Ssd1680DisplayDriver.writeRegion's coordinate validation) — that's a
+                // RuntimeException escaping this try, not something ExecutionException/
+                // InterruptedException below would catch, so it needs its own clause: one bad
+                // frame must not end the display thread for every frame after it.
+                CompletableFuture<Void> future = r.decision().region()
+                        .map(region -> display.writeRegion(
+                                region.x(), region.y(), region.width(), region.height(), r.frame()))
+                        .orElseGet(() -> display.writeFrame(r.frame()));
+                // Waits on this (display) thread, not the FX thread — per EInkDisplayDriver's
+                // threading contract, this is exactly what serialises writes one at a time.
+                future.get();
+            } catch (ExecutionException e) {
+                LOG.error("Display write failed", e.getCause());
+            } catch (InterruptedException e) {
+                // Only reachable via stop()'s timed-out fallback interrupt (the normal shutdown
+                // path drains via the poison pill instead, precisely to avoid abandoning a write
+                // mid-flight) — the driver's own write (on its internal virtual thread, per
+                // EInkDisplayDriver's contract) is not cancelled and completes on its own.
+                Thread.currentThread().interrupt();
+            } catch (RuntimeException e) {
+                LOG.error("Display write rejected", e);
+            } finally {
+                writeInFlight.set(false);
+            }
         } finally {
-            writeInFlight.set(false);
+            recycle(work);
+            if (refreshPending.get() && !stopped) {
+                try {
+                    Platform.runLater(this::retryPendingCapture);
+                } catch (IllegalStateException e) {
+                    // Toolkit already shut down between the stopped check above and this call —
+                    // a benign shutdown race, not a display-thread failure (finding C12).
+                    LOG.debug("Could not schedule pending-refresh retry; toolkit likely shut down", e);
+                }
+            }
+        }
+    }
+
+    /**
+     * Retries a {@link #requestRefresh()}/{@link #forceRefresh()} that a previous capture
+     * attempt had to skip for want of a free buffer — scheduled by {@link #processRenderWork}
+     * onto the FX thread right after it returns a buffer to {@link #freeBuffers}, so a buffer
+     * is normally available immediately. Re-checks {@link #refreshPending} first since it may
+     * already have been satisfied by an unrelated capture (the timer, or another retry) that
+     * ran between this being scheduled and now.
+     */
+    private void retryPendingCapture() {
+        if (refreshPending.get()) {
+            maybeCapture(true);
         }
     }
 
@@ -945,23 +1343,190 @@ public final class EInkBridge {
     }
 
     /**
-     * Triggers an immediate capture and pipeline run, bypassing the timer interval (but not
-     * the in-flight-write backpressure), writing only if the frame actually changed.
+     * Triggers an immediate capture and pipeline run, bypassing the timer interval, writing
+     * only if the frame actually changed. Safe to call from any thread — if not already on the
+     * FX thread, the actual capture is dispatched there via {@code Platform.runLater(...)}
+     * (snapshotting requires it); note this throws {@code IllegalStateException} if called
+     * off the FX thread before the JavaFX toolkit has started (e.g. from
+     * {@code Application.init()}), and is silently dropped if called after
+     * {@code Platform.exit()}.
+     *
+     * <p>If no free capture buffer is available right now (the display thread is still working
+     * through the previous frame), the request is not dropped: it is retried automatically as
+     * soon as a buffer is returned — see {@link #refreshPending}'s javadoc (2026-09-22 Opus
+     * review finding C1). This matters most with {@link Builder#captureIntervalMs(long)
+     * captureIntervalMs(0)}, where there is no timer to pick up a dropped request on its own —
+     * which is also why this method must actually bypass the interval gate itself, not just
+     * accept a parameter named as if it did (2026-09-24 Opus implementation review finding I2:
+     * an earlier version of this method called {@code triggerCapture(false)}, so in manual-only
+     * mode it could never capture anything at all).
+     *
+     * <p>Call this from the same {@code Platform.runLater(...)} turn that made the scene
+     * change you want reflected, not from an unrelated background thread afterwards — queued
+     * FX-thread work (including this bridge's own touch-event dispatch) runs in order, so a
+     * {@code requestRefresh()} issued from a different thread has no ordering guarantee
+     * relative to scene mutations that thread queues later (finding C12).
      */
     public void requestRefresh() {
-        throw new UnsupportedOperationException("EInkBridge.requestRefresh() — Phase 6.4 part C");
+        triggerCapture(true);
     }
 
     /**
      * As {@link #requestRefresh()}, but forces a write regardless of whether the frame
-     * changed — via {@link RenderSession#reset()} before the capture, which always produces a
-     * {@code FULL} refresh (there is no "force a specific mode" concept in {@code
-     * RenderSession} today — forcing {@code FAST}/{@code PARTIAL} would need new API there,
-     * not just a parameter here, so this method takes none rather than accept a
-     * {@code RefreshMode} that every value but {@code FULL} would silently misrepresent).
+     * changed. The actual {@link RenderSession#reset()} call happens on the display thread,
+     * immediately before the next {@code session.prepare()} for a frame captured at or after
+     * this call — never here — because {@code RenderSession} is documented not thread-safe and
+     * the display thread is its only permitted caller; see {@link #resetRequestedSeq}'s javadoc
+     * (2026-09-22 Opus review finding C2, refined 2026-09-24 as finding I4/I5). There is no
+     * "force a specific mode" concept in {@code RenderSession} today — forcing
+     * {@code FAST}/{@code PARTIAL} would need new API there, not just a parameter here, so this
+     * method takes none rather than accept a {@code RefreshMode} that every value but
+     * {@code FULL} would silently misrepresent.
      */
     public void forceRefresh() {
-        throw new UnsupportedOperationException("EInkBridge.forceRefresh() — Phase 6.4 part C");
+        resetRequestedSeq.set(nextCaptureSeq);
+        triggerCapture(true);
+    }
+
+    /**
+     * Shared by {@link #requestRefresh()}/{@link #forceRefresh()} — see their javadocs.
+     * {@code bypassInterval} is always {@code true} for both of this class's public callers
+     * today; it exists as a separate parameter (rather than being implied by the method you
+     * called) only because {@link #retryPendingCapture} and {@link #captureTimer} also route
+     * through {@link #maybeCapture} and need to request the two behaviours independently of
+     * which public method — if any — originally triggered them.
+     */
+    private void triggerCapture(boolean bypassInterval) {
+        refreshPending.set(true);
+        if (Platform.isFxApplicationThread()) {
+            maybeCapture(bypassInterval);
+        } else {
+            Platform.runLater(() -> maybeCapture(bypassInterval));
+        }
+    }
+
+    /**
+     * Attempts one capture. Must run on the FX thread (called directly from
+     * {@link #captureTimer}'s {@code handle()}, or via {@code Platform.runLater(...)} from
+     * {@link #triggerCapture}/{@link #retryPendingCapture}). {@code bypassInterval} bypasses the
+     * capture-interval gate only — the free-buffer backpressure check below still applies
+     * regardless (2026-09-22 Opus review finding C1's point that "bypassing the interval" must
+     * not mean "bypassing backpressure too").
+     *
+     * <p>Uses {@link #freeBuffers} availability as the sole backpressure signal, not
+     * {@link #writeInFlight} — see that field's javadoc for why the latter is set too late in
+     * {@link #processRenderWork} to mean "display thread idle" (finding C3).
+     *
+     * <p>Samples {@link #refreshPending} <em>before</em> snapshotting, and clears it afterwards
+     * only if it was already set at that sampling point — not unconditionally after any
+     * successful capture. An unconditional clear would let an ordinary timer tick (whose
+     * snapshot may have started before a concurrent {@link #requestRefresh()}/
+     * {@link #forceRefresh()} call set the flag) satisfy a request it never actually captured
+     * for, silently dropping that request with nothing left to retry it (2026-09-24 Opus
+     * implementation review finding I6).
+     */
+    private void maybeCapture(boolean bypassInterval) {
+        if (stopped) {
+            return; // belt-and-braces alongside the scene==null check below — see stop()'s javadoc
+        }
+        Scene currentScene = scene;
+        if (currentScene == null) {
+            return; // not started, or stop() already nulled it out — see stop()'s javadoc
+        }
+
+        long now = System.nanoTime(); // never AnimationTimer.handle()'s `now` — see field javadoc (C8)
+        if (!bypassInterval) {
+            if (captureIntervalMs == 0) {
+                return; // manual-only capture; only requestRefresh()/forceRefresh() drive it
+            }
+            if (!captureIntervalElapsed(now)) {
+                return;
+            }
+        }
+
+        CaptureBuffer buffer = freeBuffers.poll();
+        if (buffer == null) {
+            recordCaptureSkipped();
+            return;
+        }
+        lastCaptureNanos = now;
+        hasCaptured = true;
+        boolean pendingAtCaptureStart = refreshPending.get();
+
+        boolean submitted = false;
+        try {
+            currentScene.snapshot(captureImage);
+            captureImage.getPixelReader().getPixels(
+                    0, 0, orientationMapping.logicalWidth(), orientationMapping.logicalHeight(),
+                    javafx.scene.image.PixelFormat.getByteBgraInstance(),
+                    buffer.pixels(), 0, orientationMapping.logicalWidth() * 4);
+            offerReplacing(new RenderWork(buffer.segment(), buffer, nextCaptureSeq++));
+            submitted = true;
+            if (pendingAtCaptureStart) {
+                refreshPending.set(false);
+            }
+            consecutiveBufferStarvations.set(0);
+        } finally {
+            if (!submitted) {
+                // Never leak a polled buffer on a snapshot/getPixels failure (finding C4).
+                freeBuffers.offer(buffer);
+            }
+        }
+    }
+
+    /**
+     * The capture-interval gate, factored out of {@link #maybeCapture} so a test can exercise
+     * this exact arithmetic without a {@code Scene}/toolkit. Package-private for that reason.
+     * {@code true} means enough time has passed (or no capture has happened yet) for a
+     * non-forced capture to proceed.
+     *
+     * <p>This specific arithmetic previously overflowed: the original implementation used
+     * {@code Long.MIN_VALUE} as the "never captured" sentinel for {@link #lastCaptureNanos} and
+     * computed {@code nowNanos - lastCaptureNanos} directly. Since {@code System.nanoTime()} is
+     * positive (JVM-uptime-relative on Linux/HotSpot), that subtraction overflows a signed
+     * {@code long} and wraps to a large negative number — making the "not enough time has
+     * elapsed" comparison true unconditionally, so the timer never captured anything, ever
+     * (2026-09-24 Opus implementation review finding I1). {@link #hasCaptured} sidesteps the
+     * arithmetic entirely instead of trying to pick a safer sentinel.
+     */
+    boolean captureIntervalElapsed(long nowNanos) {
+        return !hasCaptured || nowNanos - lastCaptureNanos >= captureIntervalMs * 1_000_000L;
+    }
+
+    /**
+     * Package-private — lets a test observe free-list exhaustion/recovery directly (e.g. that a
+     * displaced or consumed {@link RenderWork}'s buffer comes back) without needing the display
+     * thread running (2026-09-24 Opus implementation review §4).
+     */
+    int freeBufferCount() {
+        return freeBuffers.size();
+    }
+
+    /**
+     * Package-private — lets a test arm {@link #resetRequestedSeq} directly and drive {@link
+     * #processRenderWork} with a {@link RenderWork} of a chosen {@code captureSeq}, exercising
+     * the reset-consumption logic (2026-09-22 finding C2, refined as I4/I5) without needing
+     * {@link #forceRefresh()}'s live-{@code Scene} capture path.
+     */
+    void armForcedReset(long requiredSeq) {
+        resetRequestedSeq.set(requiredSeq);
+    }
+
+    /**
+     * Logs a capture skipped for want of a free buffer — normal, brief backpressure at DEBUG,
+     * but escalated once to WARN after {@link #BUFFER_STARVATION_WARN_THRESHOLD} consecutive
+     * skips, since sustained starvation (a leaked buffer, or a genuinely stuck display thread)
+     * would otherwise be silent at default log levels and look like a driver/panel problem
+     * rather than an FX-thread one (2026-09-22 Opus review finding C4).
+     */
+    private void recordCaptureSkipped() {
+        int count = consecutiveBufferStarvations.incrementAndGet();
+        if (count == BUFFER_STARVATION_WARN_THRESHOLD) {
+            LOG.warn("No free capture buffer for {} consecutive capture attempts — the display "
+                    + "thread may be stuck, or a buffer was leaked", count);
+        } else {
+            LOG.debug("Capture skipped: no free buffer available");
+        }
     }
 
     // -------------------------------------------------------------------------
