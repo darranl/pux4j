@@ -32,8 +32,13 @@
     -fx-background-color: #d0d0d0;
 }
 
+/* Explicit mid-bin grey rather than opacity: 25% opacity over white is luminance ~191, one
+   step under the 4-gray light-grey/white boundary (192), so it rendered as pure white and
+   the disabled button vanished. 144 sits in the middle of the light-grey bin (128-191). */
 .counter-button:disabled {
-    -fx-opacity: 0.25;
+    -fx-border-color: #909090;
+    -fx-text-fill: #909090;
+    -fx-opacity: 1;
 }
 
 .counter-label {

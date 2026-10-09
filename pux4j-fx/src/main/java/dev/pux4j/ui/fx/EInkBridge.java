@@ -301,6 +301,7 @@ public final class EInkBridge {
     private volatile Scene scene;
     private volatile Thread displayThread;
     private volatile Thread touchThread;
+    private final AtomicBoolean stopping = new AtomicBoolean();
     private volatile boolean stopped;
 
     /**
@@ -883,8 +884,8 @@ public final class EInkBridge {
      * original ordering here protected driver teardown but not this queue race).
      */
     public void stop() {
-        if (stopped) {
-            return;
+        if (!stopping.compareAndSet(false, true)) {
+            return; // a concurrent or earlier stop() owns the teardown
         }
         stopped = true;
         // Moved ahead of captureTimer.stop()/the poison-pill hand-off below (2026-09-24 Opus

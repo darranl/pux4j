@@ -8,13 +8,13 @@
            fx:controller="dev.pux4j.ui.demo.DemoController"
            stylesheets="@demo.css"
            styleClass="eink-frame">
-    <HBox prefWidth="296" prefHeight="128" styleClass="display-area">
-        <Button fx:id="decBtn" text="&#x2212;" prefWidth="64" prefHeight="128"
+    <HBox maxWidth="Infinity" maxHeight="Infinity" styleClass="display-area">
+        <Button fx:id="decBtn" text="&#x2212;" prefWidth="64" maxHeight="Infinity"
                 styleClass="counter-button" onAction="#onDecrement"/>
-        <Label  fx:id="counterLabel" prefHeight="128" styleClass="counter-label">
+        <Label  fx:id="counterLabel" maxHeight="Infinity" styleClass="counter-label">
             <HBox.hgrow>ALWAYS</HBox.hgrow>
         </Label>
-        <Button fx:id="incBtn" text="+" prefWidth="64" prefHeight="128"
+        <Button fx:id="incBtn" text="+" prefWidth="64" maxHeight="Infinity"
                 styleClass="counter-button" onAction="#onIncrement"/>
     </HBox>
 </StackPane>

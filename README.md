@@ -29,7 +29,8 @@ application code.
 cd pux4j-ui
 ./pux4j-validation/run-smoke-emulator.sh          # smoke test in JavaFX window
 ./pux4j-validation/run-validation-emulator.sh     # interactive validation (mouse = touch)
-./pux4j-demo/run-demo.sh                          # JavaFX counter demo
+./pux4j-demo/run-demo.sh                          # JavaFX counter demo (plain desktop window)
+./pux4j-host/run-emulator.sh                      # counter demo through EInkBridge on the emulator
 ```
 The emulator is auto-selected on any machine that is not a Raspberry Pi.
 Display profile and scale are set with `--display=ssd1675a` and `--scale=3`.
@@ -107,7 +108,8 @@ pux4j/
 ├── pux4j-core/          Hardware drivers and interfaces — no JavaFX dependency
 ├── pux4j-transform/     Pixel transformation pipeline — pure Java, no JavaFX, no Pi4J
 ├── pux4j-emulator/      JavaFX visual emulator — dev/test only
-├── pux4j-fx/            JavaFX bridge
+├── pux4j-fx/            JavaFX bridge + SceneContent service interface
+├── pux4j-host/          Generic launcher: hosts a SceneContent app on EInkBridge
 ├── pux4j-validation/    Interactive hardware validation test
 ├── pux4j-demo/          Reference JavaFX demo app; compiled to JVM + native image
 └── pux4j-native/        GraalVM native shared library — C API via @CEntryPoint
@@ -148,9 +150,10 @@ Interactive 10-step hardware acceptance test. Runs against any `EInkDisplayDrive
 
 ### `pux4j-demo`
 
-Reference JavaFX application demonstrating the full stack. Runs on desktop against the
-emulator or on Pi against real hardware — driver selected via config only. Cross-compiled to
-a GraalVM native image for Pi deployment.
+Reference JavaFX application. A plain JavaFX app with no knowledge of eInk drivers: `DemoApp`
+is its desktop window, and `DemoContent` (a `SceneContent` service provider) is its UI for
+hosting. `pux4j-host` hosts it on `EInkBridge`; which drivers it runs against (emulator or a
+HAT) is decided by what the bundle contains, not by the app.
 
 ### `pux4j-native`
 
