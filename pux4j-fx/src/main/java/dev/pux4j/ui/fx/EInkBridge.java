@@ -190,6 +190,16 @@ public final class EInkBridge {
 
     private static final int BUFFER_STARVATION_WARN_THRESHOLD = 10;
 
+    /** Display-thread-only (only ever touched inside {@link #processRenderWork}, which is the
+     * only caller of {@link #logWriteFailure}/{@link #recoverFromWriteFailure}) — counts
+     * consecutive failed writes so a driver that keeps failing (e.g. disconnected hardware)
+     * logs one full stack trace and then throttles to WARN, instead of flooding the log with a
+     * full stack trace on every capture-interval retry (Part D implementation review finding
+     * I2). Reset to zero on the first successful write after a run of failures. */
+    private int consecutiveWriteFailures;
+
+    private static final int WRITE_FAILURE_WARN_THRESHOLD = 5;
+
     /** FX-thread-only (read/written exclusively inside {@link #maybeCapture}, which always
      * runs there — see that method's javadoc). Compared against {@code System.nanoTime()},
      * never an {@code AnimationTimer.handle(long)} timestamp: that clock substitutes a
@@ -1141,16 +1151,20 @@ public final class EInkBridge {
                 // Waits on this (display) thread, not the FX thread — per EInkDisplayDriver's
                 // threading contract, this is exactly what serialises writes one at a time.
                 future.get();
+                consecutiveWriteFailures = 0;
             } catch (ExecutionException e) {
-                LOG.error("Display write failed", e.getCause());
+                logWriteFailure("Display write failed", e.getCause());
+                recoverFromWriteFailure();
             } catch (InterruptedException e) {
                 // Only reachable via stop()'s timed-out fallback interrupt (the normal shutdown
                 // path drains via the poison pill instead, precisely to avoid abandoning a write
                 // mid-flight) — the driver's own write (on its internal virtual thread, per
-                // EInkDisplayDriver's contract) is not cancelled and completes on its own.
+                // EInkDisplayDriver's contract) is not cancelled and completes on its own, so
+                // RenderSession's idea of "previous" is not actually stale here; no reset armed.
                 Thread.currentThread().interrupt();
             } catch (RuntimeException e) {
-                LOG.error("Display write rejected", e);
+                logWriteFailure("Display write rejected", e);
+                recoverFromWriteFailure();
             } finally {
                 writeInFlight.set(false);
             }
@@ -1386,6 +1400,70 @@ public final class EInkBridge {
     public void forceRefresh() {
         resetRequestedSeq.set(nextCaptureSeq);
         triggerCapture(true);
+    }
+
+    /**
+     * Logs a failed write — full stack trace for the first failure in a run, throttled to a
+     * one-time WARN (no stack trace) at {@link #WRITE_FAILURE_WARN_THRESHOLD} consecutive
+     * failures thereafter, mirroring {@link #recordCaptureSkipped}'s pattern. Without this, a
+     * driver that keeps failing (disconnected hardware, a stuck bus) would log a full stack
+     * trace on every capture-interval retry {@link #recoverFromWriteFailure} triggers — on the
+     * Pi that means flooding {@code ~/tmp/run-log.txt} for as long as the fault persists (Part D
+     * implementation review finding I2).
+     */
+    private void logWriteFailure(String message, Throwable cause) {
+        consecutiveWriteFailures++;
+        if (consecutiveWriteFailures <= 1) {
+            LOG.error(message, cause);
+        } else if (consecutiveWriteFailures == WRITE_FAILURE_WARN_THRESHOLD) {
+            LOG.warn("{} consecutive write failures ({}); the display driver may be stuck or "
+                    + "disconnected — throttling further stack traces for this failure run",
+                    consecutiveWriteFailures, message);
+        } else {
+            LOG.debug("{} (failure #{} in this run)", message, consecutiveWriteFailures);
+        }
+    }
+
+    /**
+     * Recovers {@link RenderSession}'s state after {@link #processRenderWork} catches a failed
+     * write — see that method's {@code ExecutionException}/{@code RuntimeException} catch
+     * clauses. {@code RenderSession.prepareMonochrome}/{@code prepareFourGray} set
+     * {@code previous = next} <em>before</em> the write is attempted (Part D implementation
+     * review finding I9). A failed write must not silently desynchronise {@code
+     * RenderSession}'s idea of the previous frame from what the panel actually shows. Left
+     * as-is, a failed write means the driver never actually showed that frame, but
+     * {@code RenderSession} now believes it did — so a later capture of that same (never-
+     * actually-displayed) content diffs against it as "unchanged" and is silently dropped
+     * forever, and the panel never catches up.
+     *
+     * <p>Calls {@code session.reset()} directly, here, rather than only arming
+     * {@link #resetRequestedSeq} for a future capture (an earlier version of this fix, Part D
+     * implementation review finding I1): this method always runs on the display thread — inside
+     * {@link #processRenderWork}, which {@link RenderSession}'s own contract makes the only
+     * permitted caller of {@code reset()}/{@code prepare()} — so calling it immediately is safe,
+     * and it closes a gap the seq-based approach left open. A frame captured <em>before</em> the
+     * failure but still queued behind it (its {@code captureSeq} therefore below whatever
+     * {@link #resetRequestedSeq} would have been armed to) would otherwise still diff against
+     * the stale {@code previous} on its own turn through {@code processRenderWork} — right up
+     * until the seq-armed reset eventually caught a later frame — risking one intermediate
+     * PARTIAL write composited against content the panel never actually received. Resetting
+     * immediately means the very next {@code processRenderWork} call of any kind, whatever its
+     * {@code captureSeq}, sees {@code previous == null} and gets an unconditional FULL write.
+     *
+     * <p>Falls back to {@link #resetRequestedSeq} (the same mechanism {@link #forceRefresh()}
+     * uses) only if {@code session.reset()} itself throws — still better than losing the
+     * recovery request entirely, and consistent with {@link #resetRequestedSeq}'s existing
+     * "survive a throw for a later frame to retry" contract (finding I5).
+     */
+    private void recoverFromWriteFailure() {
+        try {
+            session.reset();
+        } catch (RuntimeException e) {
+            LOG.error("session.reset() itself failed while recovering from a write failure; "
+                    + "arming a reset for the next capture instead", e);
+            long target = nextCaptureSeq;
+            resetRequestedSeq.updateAndGet(current -> Math.max(current, target));
+        }
     }
 
     /**

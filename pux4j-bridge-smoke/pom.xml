@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>dev.pux4j.ui</groupId>
+        <artifactId>pux4j-ui</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>pux4j-bridge-smoke</artifactId>
+    <name>pux4j :: Bridge Smoke Test</name>
+    <description>
+        Phase 6.4 part D: a runnable, self-verifying headless smoke test that wires EInkBridge
+        to the PNG display driver and the programmatic touch driver and drives it with injected
+        touches. Deliberately its own module, not part of pux4j-validation: it requires
+        javafx.controls/javafx.graphics, which pux4j-validation's hardware dist profiles
+        (dist-hat-2in13v4/dist-hat-2in9v2) exclude from their lib/ — adding this dependency
+        there would break both dist launchers on the Pi. This module is never packaged into
+        either dist.
+    </description>
+
+    <properties>
+        <!-- A dev-loop/CI diagnostic tool, not a library other projects should depend on —
+             never publish it to Maven Central. -->
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <maven.install.skip>true</maven.install.skip>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>dev.pux4j.ui</groupId>
+            <artifactId>pux4j-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.pux4j.ui</groupId>
+            <artifactId>pux4j-transform</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.pux4j.ui</groupId>
+            <artifactId>pux4j-fx</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-graphics</artifactId>
+            <classifier>${javafx.platform}</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>dev.pux4j.ui.bridgesmoke.BridgeSmokeTest</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
