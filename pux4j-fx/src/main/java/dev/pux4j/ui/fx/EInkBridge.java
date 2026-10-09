@@ -43,9 +43,11 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Consumer;
 
 /**
  * JavaFX bridge entry point. Wires a stage-less JavaFX {@code Scene} to an
@@ -64,7 +66,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * call site.
  *
  * <p>{@link #start(Scene)}/{@link #stop()}, the display/touch virtual threads (Phase 6.4 part
- * B), and timer/application-driven scene capture with a two-buffer free list (Phase 6.4 part
+ * B), and timer/application-driven scene capture with a three-buffer free list (Phase 6.4 part
  * C — {@link #requestRefresh()}, {@link #forceRefresh()}) are all implemented. See the Scene
  * Capture and Threading sections of the design doc, and the 2026-09-22 (design) and 2026-09-24
  * (implementation) Opus reviews of this phase (findings C1-C12 and I1-I9) for the reasoning
@@ -77,8 +79,40 @@ public final class EInkBridge {
 
     private static final long DEFAULT_CAPTURE_INTERVAL_MS = 200L;
 
-    /** How long the touch thread sleeps between polls when a read comes back empty. */
+    /**
+     * Pixel buffers cycled between the FX and display threads: one being written, one queued,
+     * and one spare so a capture taken while both are occupied can still displace the stale
+     * queued frame ("latest wins"). With only two, that capture finds no buffer and is skipped,
+     * so the stale frame is written anyway — an extra e-ink refresh cycle (CP3 finding 3).
+     */
+    private static final int CAPTURE_BUFFER_COUNT = 3;
+
+    /** How long the touch thread sleeps after every poll, empty or not (see {@link #runTouchLoop}). */
     private static final long TOUCH_POLL_IDLE_MS = 10L;
+
+    /** How long {@link #stop()} waits for the touch thread to exit after interrupting it. */
+    private static final long TOUCH_JOIN_TIMEOUT_MS = 2_000L;
+
+    /**
+     * One dispatch to the FX thread may be outstanding at a time — the touch thread acquires
+     * this before each {@code Platform.runLater} and the FX-thread task releases it. Without
+     * it, a held touch (non-empty polls, no sleep) floods the FX queue faster than a busy FX
+     * thread (e.g. mid-{@code snapshot}) can drain it (CP3 finding 1).
+     */
+    private final Semaphore touchDispatchPermit = new Semaphore(1);
+
+    /** Where touch hand-offs are posted. {@code Platform::runLater}; replaceable by tests. */
+    private volatile Consumer<Runnable> fxExecutor = Platform::runLater;
+
+    /** Package-private test seam — see {@link #fxExecutor}. */
+    void setFxExecutorForTest(Consumer<Runnable> executor) {
+        this.fxExecutor = executor;
+    }
+
+    /** Package-private test seam — removes one buffer from the free list, as a capture would. */
+    CaptureBuffer pollFreeBufferForTest() {
+        return freeBuffers.poll();
+    }
 
     /**
      * Maximum scene-coordinate distance, in pixels, between a press and its matching release
@@ -117,17 +151,20 @@ public final class EInkBridge {
     private final WritableImage captureImage;
 
     /**
-     * Two-entry free list of pixel buffers cycled between the FX thread (fills one per
+     * Three-entry free list of pixel buffers cycled between the FX thread (fills one per
      * capture) and the display thread (returns one after {@link #processRenderWork} finishes
      * with it, via {@link #recycle}) — see the design doc's Pixel handoff section. Each
      * {@link CaptureBuffer} pairs a {@code byte[]} with a {@code MemorySegment} created once
      * over that same array ({@link MemorySegment#ofArray}), so no segment is ever built from a
-     * {@code ByteBuffer}'s position/limit (2026-09-22 Opus review finding C9). Capacity 2 is
+     * {@code ByteBuffer}'s position/limit (2026-09-22 Opus review finding C9). Capacity 3 is
      * also the sole capture backpressure signal (C3): {@link #maybeCapture} skips a tick
      * entirely when {@code poll()} returns {@code null} rather than consulting
-     * {@link #writeInFlight}.
+     * {@link #writeInFlight}. With three buffers the backpressure is loose by design: during a
+     * long refresh a tick still snapshots (as an idle tick does anyway) and displaces the stale
+     * queued frame; ticks are only skipped when all three are out, which is also the only
+     * condition that triggers the starvation WARN (one leaked buffer is therefore silent).
      */
-    private final BlockingQueue<CaptureBuffer> freeBuffers = new ArrayBlockingQueue<>(2);
+    private final BlockingQueue<CaptureBuffer> freeBuffers = new ArrayBlockingQueue<>(CAPTURE_BUFFER_COUNT);
 
     /**
      * FX-thread-only write (bumped in {@link #maybeCapture} immediately before each successful
@@ -307,8 +344,9 @@ public final class EInkBridge {
         int h = orientationMapping.logicalHeight();
         this.captureImage = new WritableImage(w, h);
         int bufferSize = w * 4 * h;
-        this.freeBuffers.add(newCaptureBuffer(bufferSize));
-        this.freeBuffers.add(newCaptureBuffer(bufferSize));
+        for (int i = 0; i < CAPTURE_BUFFER_COUNT; i++) {
+            this.freeBuffers.add(newCaptureBuffer(bufferSize));
+        }
     }
 
     /**
@@ -821,6 +859,12 @@ public final class EInkBridge {
      * #submitRenderWork} already uses) and the thread is joined with a bounded timeout,
      * falling back to interrupt only if a write appears to be stuck.
      *
+     * <p>If called on the FX thread while the display thread is still draining, waits in a
+     * nested event loop (so writes that complete via {@code Platform.runLater} can finish), which
+     * means other FX-thread work — pulses, queued {@code runLater} tasks, app handlers — can run
+     * <em>inside</em> this call. From inside a pulse (nested loops are illegal there) it falls
+     * back to a blocking join and the stall that avoids is back (CP3 finding 4).
+     *
      * <p>Deliberately NOT asserted to run on the FX thread (unlike {@link #start}) — it must
      * stay callable from wherever {@link #start} was never reached (e.g. driver construction
      * succeeded but the application is shutting down before showing anything). Because of
@@ -858,16 +902,24 @@ public final class EInkBridge {
 
         if (touchThread != null) {
             touchThread.interrupt();
-            joinQuietly(touchThread, 0);
+            joinQuietly(touchThread, TOUCH_JOIN_TIMEOUT_MS);
+            if (touchThread.isAlive()) {
+                LOG.warn("Touch thread did not exit within {} ms (readTouches() stuck?); "
+                        + "continuing shutdown", TOUCH_JOIN_TIMEOUT_MS);
+            }
             touchThread = null;
         }
         if (displayThread != null) {
             offerReplacing(POISON_PILL);
-            joinQuietly(displayThread, DISPLAY_DRAIN_TIMEOUT_MS);
+            awaitDisplayThreadExit(displayThread, DISPLAY_DRAIN_TIMEOUT_MS);
             if (displayThread.isAlive()) {
                 LOG.warn("Display thread did not drain within {} ms; interrupting", DISPLAY_DRAIN_TIMEOUT_MS);
                 displayThread.interrupt();
-                joinQuietly(displayThread, 0);
+                joinQuietly(displayThread, DISPLAY_DRAIN_TIMEOUT_MS);
+                if (displayThread.isAlive()) {
+                    LOG.warn("Display thread still alive {} ms after interrupt; releasing the "
+                            + "driver anyway", DISPLAY_DRAIN_TIMEOUT_MS);
+                }
             }
             displayThread = null;
         }
@@ -892,6 +944,47 @@ public final class EInkBridge {
             }
         }
         LOG.info("EInkBridge stopped");
+    }
+
+    /**
+     * Joins {@code thread} for up to {@code timeoutMs}. On the FX thread a plain join would
+     * stall every in-flight write that completes via {@code Platform.runLater} (the emulator's
+     * does) for the whole timeout, so there it waits in a nested event loop instead, which the
+     * joiner exits as soon as the thread ends (CP3 finding 4). Falls back to a plain bounded
+     * join if a nested loop isn't permitted (e.g. during toolkit shutdown).
+     */
+    private static void awaitDisplayThreadExit(Thread thread, long timeoutMs) {
+        // enterNestedEventLoop throws during a pulse (e.g. stop() called from an AnimationTimer
+        // or an animation's onFinished handler); canStartNestedEventLoop() reports exactly that.
+        if (!Platform.isFxApplicationThread() || !thread.isAlive()
+                || !Platform.canStartNestedEventLoop()) {
+            joinQuietly(thread, timeoutMs);
+            return;
+        }
+        Object key = new Object();
+        // Only ever read/written on the FX thread (the exit task below runs there), so a plain
+        // array cell is enough: it guards against exiting a loop that was never entered.
+        boolean[] entered = {false};
+        Thread.ofVirtual().name("eink-stop-join").start(() -> {
+            joinQuietly(thread, timeoutMs);
+            try {
+                Platform.runLater(() -> {
+                    if (entered[0]) {
+                        Platform.exitNestedEventLoop(key, null);
+                    }
+                });
+            } catch (IllegalStateException e) {
+                // toolkit gone; the toolkit exits any nested loop itself on shutdown
+            }
+        });
+        try {
+            entered[0] = true;
+            Platform.enterNestedEventLoop(key);
+        } catch (IllegalStateException e) {
+            entered[0] = false;
+            LOG.debug("Nested event loop not permitted during stop(); using a blocking join", e);
+            joinQuietly(thread, timeoutMs);
+        }
     }
 
     /** {@code timeoutMs == 0} means join indefinitely — see {@link Thread#join(long)}. */
@@ -1208,8 +1301,8 @@ public final class EInkBridge {
     private record ContactState(Node pressedNode, double pressX, double pressY, double lastX, double lastY) {}
 
     /**
-     * Polls {@link TouchDriver#readTouches()} and dispatches each batch to the FX thread. An
-     * empty poll is normally just an idle-sleep — except when {@link #hasActiveContacts} says
+     * Package-private for tests (CP3). Polls {@link TouchDriver#readTouches()} and dispatches each batch to the FX thread. An
+     * empty poll is normally dispatched as nothing — except when {@link #hasActiveContacts} says
      * a contact is still tracked as down, in which case the empty poll is dispatched anyway so
      * {@link #injectTouches} can synthesize its release (see that method's javadoc for why a
      * lift doesn't always arrive as an explicit {@code down=false} point). A {@link
@@ -1218,30 +1311,62 @@ public final class EInkBridge {
      * the rest of the process on one bad read would be a much worse failure mode than a
      * dropped poll.
      */
-    private void runTouchLoop() {
+    void runTouchLoop() {
         LOG.info("Touch thread started");
         try {
-            while (true) {
+            // The per-iteration sleep() is what normally delivers the interrupt; the flag check
+            // is a backstop for an interrupt that lands while blocked elsewhere and whose
+            // InterruptedException was consumed (CP3 finding 2).
+            while (!Thread.currentThread().isInterrupted()) {
+                // Permit first, then read: a batch read while the FX thread is still busy would
+                // go stale waiting for it. Released here if there is nothing to dispatch,
+                // otherwise by the FX-thread task (or dispatchToFxThread if it is rejected).
+                touchDispatchPermit.acquire();
+                boolean dispatched = false;
                 try {
                     List<TouchPoint> raw = touchDriver.readTouches();
-                    if (raw.isEmpty()) {
-                        if (hasActiveContacts.get()) {
-                            Platform.runLater(() -> injectTouches(List.of()));
-                        }
-                        Thread.sleep(TOUCH_POLL_IDLE_MS);
-                        continue;
+                    if (!raw.isEmpty()) {
+                        dispatchToFxThread(raw.stream().map(touchMapper::map).toList());
+                        dispatched = true;
+                    } else if (hasActiveContacts.get()) {
+                        dispatchToFxThread(List.of());
+                        dispatched = true;
                     }
-                    List<TouchPoint> mapped = raw.stream().map(touchMapper::map).toList();
-                    Platform.runLater(() -> injectTouches(mapped));
                 } catch (RuntimeException e) {
                     LOG.error("Touch poll failed; retrying", e);
-                    Thread.sleep(TOUCH_POLL_IDLE_MS);
+                } finally {
+                    if (!dispatched) {
+                        touchDispatchPermit.release();
+                    }
                 }
+                Thread.sleep(TOUCH_POLL_IDLE_MS);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
         LOG.info("Touch thread exiting");
+    }
+
+    /**
+     * Hands one poll's contacts to the FX thread; the caller already holds
+     * {@link #touchDispatchPermit}, which the posted task releases once it has run.
+     * Batches already read are never dropped or merged, so a press and its release can't be coalesced away; the IC
+     * simply isn't read again until the FX thread has caught up (so whether a tap that starts
+     * and ends entirely inside one FX stall survives depends on the IC holding its report).
+     * If the toolkit has already exited, {@code runLater} drops the task silently rather than
+     * throwing, so the permit is then never released — harmless, since {@link #stop()}
+     * interrupts the thread out of {@code acquire()}.
+     */
+    private void dispatchToFxThread(List<TouchPoint> contacts) {
+        // If the executor throws (toolkit never started), the task was rejected and the caller's
+        // finally releases the permit, since it never got as far as marking the dispatch made.
+        fxExecutor.accept(() -> {
+            try {
+                injectTouches(contacts);
+            } finally {
+                touchDispatchPermit.release();
+            }
+        });
     }
 
     /**
