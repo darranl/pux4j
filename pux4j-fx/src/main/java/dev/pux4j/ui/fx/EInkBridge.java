@@ -1230,6 +1230,9 @@ public final class EInkBridge {
                 return;
             }
             RenderResult r = result.get();
+            LOG.info("Bridge frame: captureSeq={} mode={} region={} frameBytes={}",
+                work.captureSeq(), r.decision().mode(), r.decision().region(),
+                r.frame() instanceof dev.pux4j.ui.core.MonochromeFrame mf ? mf.data().length : -1);
             writeInFlight.set(true);
             try {
                 // A driver may reject an out-of-range region or an unsupported FrameData/

@@ -31,6 +31,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.zip.CRC32;
 
 final class Ssd1680DisplayDriver implements EInkDisplayDriver {
 
@@ -221,22 +222,22 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             throw new IllegalArgumentException("x must be a multiple of 8 for SSD1680 alignment (x=" + x + ")");
         }
 
+        // The controller refreshes the whole panel on every update, and (with RAM ping-pong
+        // enabled, which the observed behaviour suggests) swaps the roles of its two RAMs
+        // afterwards. A windowed write therefore leaves stale content outside the window in one
+        // RAM, which shows up as an older image on the next update. So the region is merged into
+        // the full frame and both RAMs are always set completely, as writePartialFrame does.
         return CompletableFuture.runAsync(() -> {
-            configurePartialRefreshMode();
-
-            waitBusy();
-            setWindow(x, y, x + width - 1, y + height - 1);
-            setCursor(x, y);
-            sendCommand(CMD_WRITE_BW_RAM);
-            sendData(data);
-
-            // Trigger display update sequence — SSD1680 CMD 0x20 (Master Activation); waits for BUSY to clear after refresh
-            sendCommand(CMD_DISP_UPDATE_2);
-            sendData((byte) 0xFF);
-            sendCommand(CMD_ACTIVATE);
-            waitBusy();
-
-            partialRefreshCount++;
+            byte[] merged = lastFrameBytes.clone();
+            mergeRegion(merged, x, y, width, height, data);
+            log.info("SSD1680 writeRegion: x={} y={} w={} h={} regionBytes={} regionCrc={} -> full-window update",
+                x, y, width, height, data.length, crc(data));
+            if (refreshPolicy.shouldFullRefresh(getRefreshStats(), RefreshMode.PARTIAL)) {
+                log.debug("writeRegion: policy upgraded PARTIAL → FULL");
+                doWriteFullFrame(merged);
+            } else {
+                doWritePartialFrame(merged);
+            }
         }, DRIVER_EXECUTOR);
     }
 
@@ -322,7 +323,13 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
         if (data.length != FRAME_BYTES) {
             throw new IllegalArgumentException("writeFullFrame: expected " + FRAME_BYTES + " bytes, got " + data.length);
         }
-        return CompletableFuture.runAsync(() -> {
+        return CompletableFuture.runAsync(() -> doWriteFullFrame(data), DRIVER_EXECUTOR);
+    }
+
+    private void doWriteFullFrame(byte[] data) {
+        {
+            log.info("SSD1680 writeFullFrame: frameCrc={} lastFrameCrc(before)={} (writes BW+RED)",
+                crc(data), crc(lastFrameBytes));
             configureFullRefreshMode();
 
             waitBusy();
@@ -344,7 +351,7 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             partialRefreshCount = 0;
             fastRefreshCount = 0;
             lastFullRefreshTimeMs = System.currentTimeMillis();
-        }, DRIVER_EXECUTOR);
+        }
     }
 
     private CompletableFuture<Void> writeFastFrame(byte[] data) {
@@ -352,6 +359,8 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             throw new IllegalArgumentException("writeFastFrame: expected " + FRAME_BYTES + " bytes, got " + data.length);
         }
         return CompletableFuture.runAsync(() -> {
+            log.info("SSD1680 writeFastFrame: frameCrc={} lastFrameCrc(before)={} (writes BW+RED)",
+                crc(data), crc(lastFrameBytes));
             configureFastRefreshMode();
 
             waitBusy();
@@ -382,7 +391,13 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
             throw new IllegalArgumentException("writePartialFrame: expected " + FRAME_BYTES + " bytes, got " + data.length);
         }
 
-        return CompletableFuture.runAsync(() -> {
+        return CompletableFuture.runAsync(() -> doWritePartialFrame(data), DRIVER_EXECUTOR);
+    }
+
+    private void doWritePartialFrame(byte[] data) {
+        {
+            log.info("SSD1680 writePartialFrame: frameCrc={} RED(prev)Crc={} BW(new)Crc={}",
+                crc(data), crc(lastFrameBytes), crc(data));
             configurePartialRefreshMode();
 
             waitBusy();
@@ -405,7 +420,24 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
 
             System.arraycopy(data, 0, lastFrameBytes, 0, FRAME_BYTES);
             partialRefreshCount++;
-        }, DRIVER_EXECUTOR);
+        }
+    }
+
+    /**
+     * Writes a packed region ({@code ceil(width/8)} bytes per row — the layout {@code writeRegion}
+     * receives) into a full frame (row stride {@link #BYTES_PER_ROW}). {@code x} must be a multiple of 8.
+     */
+    static void mergeRegion(byte[] frame, int x, int y, int width, int height, byte[] region) {
+        int rowBytes = (width + 7) / 8;
+        for (int row = 0; row < height; row++) {
+            System.arraycopy(region, row * rowBytes, frame, (y + row) * BYTES_PER_ROW + (x >> 3), rowBytes);
+        }
+    }
+
+    private static String crc(byte[] b) {
+        CRC32 c = new CRC32();
+        c.update(b);
+        return String.format("%08x", c.getValue());
     }
 
     private void setWindow(int xStart, int yStart, int xEnd, int yEnd) {
