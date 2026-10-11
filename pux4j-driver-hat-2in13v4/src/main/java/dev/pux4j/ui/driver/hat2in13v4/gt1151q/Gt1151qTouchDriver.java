@@ -35,6 +35,7 @@ final class Gt1151qTouchDriver implements TouchDriver {
     private final I2C           i2c;
     private final DigitalOutput touchRst;
     private final DigitalInput  touchInt;
+    private final TouchContactTracker contacts = new TouchContactTracker();
 
     Gt1151qTouchDriver(Pux4jContext context, DriverConfig config) {
         Context ctx = context.pi4j();
@@ -90,14 +91,17 @@ final class Gt1151qTouchDriver implements TouchDriver {
     public void reset() {
         log.debug("GT1151Q: reset");
         hardwareReset();
+        contacts.clear();
     }
 
     @Override
     public List<TouchPoint> readTouches() {
-        // INT pin is active-LOW: the GT1151Q drives it LOW when new touch data is available.
-        // If INT is HIGH there is no pending event — skip I2C entirely to avoid unnecessary bus traffic.
+        // INT is active-LOW: the chip drives it LOW when it has a new report. HIGH means "no new
+        // report", NOT "no finger" — a held finger reports at the chip's scan rate, so polls
+        // between reports must keep returning the held contacts (see TouchContactTracker), or a
+        // consumer would see a lift and re-press, and a single tap would register several clicks.
         if (touchInt.isHigh()) {
-            return Collections.emptyList();
+            return contacts.onNoReport(System.nanoTime());
         }
         log.debug("GT1151Q: INT asserted (LOW) — reading touch data");
 
@@ -108,19 +112,21 @@ final class Gt1151qTouchDriver implements TouchDriver {
         int status = statusBuf[0] & 0xFF;
 
         if ((status & 0x80) == 0) {
+            // Buffer not ready: nothing new to read, which says nothing about whether a finger is down.
             writeRegister(REG_TOUCH_STATUS, (byte) 0x00);
-            return Collections.emptyList();
+            return contacts.onNoReport(System.nanoTime());
         }
 
         int touchCount = status & 0x0F;
         if (touchCount == 0) {
+            // A ready frame reporting zero contacts is the chip announcing a lift.
             writeRegister(REG_TOUCH_STATUS, (byte) 0x00);
-            return Collections.emptyList();
+            return contacts.onReport(Collections.emptyList(), System.nanoTime());
         }
         if (touchCount > MAX_TOUCH_POINTS) {
             log.warn("GT1151Q: unexpected touch count {}, discarding", touchCount);
             writeRegister(REG_TOUCH_STATUS, (byte) 0x00);
-            return Collections.emptyList();
+            return contacts.onNoReport(System.nanoTime());
         }
 
         // Read touch point coordinates from GT1151Q data register 0x814F (8 bytes per point).
@@ -141,7 +147,7 @@ final class Gt1151qTouchDriver implements TouchDriver {
         }
 
         log.debug("GT1151Q: {} touch contact(s): {}", touchCount, points);
-        return Collections.unmodifiableList(points);
+        return contacts.onReport(points, System.nanoTime());
     }
 
     private void readRegister(int reg, byte[] buf) {

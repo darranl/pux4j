@@ -68,9 +68,15 @@ available yet; these instructions will be added here when it is. What to expect 
 - **One tap, one change:** a tap should change the number by exactly one.
 - Some ghosting after many partial updates is normal e-paper behaviour.
 
-### Known risk: GT1151Q "no new report" read as a lift
+### GT1151Q held-finger handling
 
-`Gt1151qTouchDriver.readTouches()` returns an empty list whenever the INT pin is high ("no new
-report"). The bridge polls every 10 ms and treats a contact missing from a poll as a lift, so a
-finger resting on the panel between the chip's reports can produce release, re-press and another
-click. Symptom: one tap increments the counter by 2 or more.
+The GT1151Q only raises INT when it has a new report, so polls between reports of a resting finger
+find nothing to read. `Gt1151qTouchDriver` therefore keeps reporting the last contacts until the
+chip sends an explicit zero-contact frame, or until no report has arrived for 100 ms (a fallback
+in case the chip never announces a lift). Without that, the bridge sees a lift and a fresh press
+between reports and a single tap can register several clicks.
+
+This is unit-tested (`TouchContactTrackerTest`) but the chip's real report timing is only
+confirmed on hardware. If one tap still changes the counter by more than one, or a tap feels
+slow to release, that is where to look. The 2.9" HAT's ICNT86X driver has the same
+INT-high-means-empty pattern and has not been changed.
