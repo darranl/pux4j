@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package dev.pux4j.ui.host;
+package dev.pux4j.ui.launcher;
 
 import dev.pux4j.ui.fx.EInkBridge;
 import dev.pux4j.ui.fx.SceneContent;
@@ -15,24 +15,32 @@ import java.util.ServiceLoader;
 import java.util.concurrent.CountDownLatch;
 
 /**
- * Hosts a {@link SceneContent} provider on an {@link EInkBridge}. Driver selection is
+ * Runs a {@link SceneContent} app on an {@link EInkBridge}. Driver selection is
  * {@link EInkBridge#fromConfig()} (the {@code pux4j.*} system properties plus whichever driver
- * modules are on the module path); the application is the {@code SceneContent} provider found
- * on the module path, chosen with {@code -Dpux4j.app=<name>} when there is more than one.
+ * modules are on the module path); the app is a {@code SceneContent} provider found on the
+ * module path, chosen by the first argument (or {@code -Dpux4j.app=<name>}) when there is more
+ * than one. {@code --list} prints the available app names and exits.
  *
  * <p>The main thread stays alive for the whole run: drivers such as the emulator's tie their
  * window's lifetime to the thread that created them.
  */
-public final class BridgeHost {
+public final class EInkLauncher {
 
-    private static final Logger LOG = LoggerFactory.getLogger(BridgeHost.class);
+    private static final Logger LOG = LoggerFactory.getLogger(EInkLauncher.class);
 
-    private BridgeHost() {
+    private EInkLauncher() {
     }
 
     public static void main(String[] args) throws Exception {
+        if (args.length > 0 && args[0].equals("--list")) {
+            findContent().forEach(c -> System.out.println(c.name()));
+            return;
+        }
+        if (args.length > 0 && !args[0].startsWith("-")) {
+            System.setProperty("pux4j.app", args[0]);
+        }
         SceneContent content = selectContent();
-        LOG.info("Hosting '{}'", content.name());
+        LOG.info("Launching '{}'", content.name());
 
         // Toolkit first (drivers such as the emulator open windows through it), but drivers
         // are constructed here, off the FX thread — see EInkBridge's class javadoc.
@@ -47,7 +55,7 @@ public final class BridgeHost {
             throw e;
         }
         // Idempotent; runs on Ctrl-C/SIGTERM so the panel is put to sleep.
-        Runtime.getRuntime().addShutdownHook(new Thread(bridge::stop, "host-shutdown"));
+        Runtime.getRuntime().addShutdownHook(new Thread(bridge::stop, "launcher-shutdown"));
 
         CountDownLatch failed = new CountDownLatch(1);
         Platform.runLater(() -> {
@@ -66,10 +74,15 @@ public final class BridgeHost {
         System.exit(1);
     }
 
-    private static SceneContent selectContent() {
-        String wanted = System.getProperty("pux4j.app");
+    private static List<SceneContent> findContent() {
         List<SceneContent> found = new ArrayList<>();
         ServiceLoader.load(SceneContent.class).forEach(found::add);
+        return found;
+    }
+
+    private static SceneContent selectContent() {
+        String wanted = System.getProperty("pux4j.app");
+        List<SceneContent> found = findContent();
         List<String> names = found.stream().map(SceneContent::name).toList();
         if (wanted != null) {
             return found.stream().filter(c -> c.name().equals(wanted)).findFirst()
@@ -79,7 +92,7 @@ public final class BridgeHost {
         if (found.size() != 1) {
             throw new IllegalStateException(found.isEmpty()
                     ? "No SceneContent provider on the module path"
-                    : "Several SceneContent providers " + names + "; choose with -Dpux4j.app=<name>");
+                    : "Several SceneContent providers " + names + "; choose one by name (first argument)");
         }
         return found.get(0);
     }

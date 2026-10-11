@@ -27,7 +27,7 @@
         <module>pux4j-transform</module>
         <module>pux4j-emulator</module>
         <module>pux4j-fx</module>
-        <module>pux4j-host</module>
+        <module>pux4j-launcher</module>
         <module>pux4j-bridge-smoke</module>
         <module>pux4j-validation</module>
         <module>pux4j-demo</module>
@@ -140,7 +140,7 @@
             </dependency>
             <dependency>
                 <groupId>dev.pux4j.ui</groupId>
-                <artifactId>pux4j-host</artifactId>
+                <artifactId>pux4j-launcher</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

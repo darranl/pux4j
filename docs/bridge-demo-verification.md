@@ -38,7 +38,7 @@ Upside-down, mirrored, or `+`/`−` swapped means an orientation bug.
 The headless run proves the logic; this checks a real window with mouse input.
 
 ```bash
-./pux4j-host/run-emulator.sh -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4
+./pux4j-launcher/run-emulator.sh -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4
 ```
 
 Omit the `-Dpux4j.emulator.display` property for the 2.9" profile. A panel-shaped window opens and
@@ -55,8 +55,33 @@ the mouse acts as the finger. Check:
 
 ## 3. Expected behaviour on a real HAT
 
-Running on a Pi needs a hardware bundle (HAT drivers instead of the emulator), which is not
-available yet; these instructions will be added here when it is. What to expect when it runs:
+### Running it
+
+A hardware bundle is the `bundle-hat-2in13v4` profile of `pux4j-launcher`: the launcher, the
+demo apps and the 2.13" V4 HAT drivers (SSD1680 + GT1151Q) instead of the emulator. It is built
+for the Pi with the aarch64 JavaFX jars:
+
+```bash
+mvn -pl pux4j-launcher -am -Pbundle-hat-2in13v4 -Djavafx.platform=linux-aarch64 \
+    -DskipTests -DincludeScope=runtime \
+    package dependency:copy-dependencies -DoutputDirectory=<dir>/lib
+```
+
+Put `<dir>/lib` and `pux4j-launcher-*.jar` (into the same `lib/`) on the Pi, with
+`pux4j-launcher/src/main/scripts/pux4j` in a `bin/` directory next to it. On the Pi:
+
+```bash
+pux4j --list        # the apps in the bundle
+pux4j demo          # run the counter demo (the name is optional while there is only one app)
+```
+
+Other `pux4j.*` properties go on the same line as `-D` options, e.g.
+`pux4j demo -Dpux4j.display.orientation=LANDSCAPE`. The Pi needs a JDK 25 on the `PATH` and a
+graphical session (JavaFX starts a toolkit even though nothing is shown on it): from a plain SSH
+shell `DISPLAY` must point at that session, and the script defaults it to `:0`. Output is also
+written to `~/tmp/run-log.txt`.
+
+### What to expect
 
 - **Start-up:** one visible full-panel flash (FULL refresh), then the static frame from the table
   above. Monochrome, no greys; the `−` box is invisible.

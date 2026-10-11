@@ -30,13 +30,13 @@ cd pux4j-ui
 ./pux4j-validation/run-smoke-emulator.sh          # smoke test in JavaFX window
 ./pux4j-validation/run-validation-emulator.sh     # interactive validation (mouse = touch)
 ./pux4j-demo/run-demo.sh                          # JavaFX counter demo (plain desktop window)
-./pux4j-host/run-emulator.sh                      # counter demo through EInkBridge on the emulator
+./pux4j-launcher/run-emulator.sh [<app>]            # counter demo through EInkBridge on the emulator
 ./pux4j-bridge-smoke/run-demo-check.sh            # headless: counter demo + taps on both panel sizes, PNG frames
 ```
 The emulator is auto-selected on any machine that is not a Raspberry Pi.
 Display profile and scale are set with `--display=ssd1675a` and `--scale=3` on the validation
 scripts; `run-emulator.sh` takes them as system properties instead, e.g.
-`./pux4j-host/run-emulator.sh -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4`.
+`./pux4j-launcher/run-emulator.sh -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4`.
 See [`docs/bridge-demo-verification.md`](docs/bridge-demo-verification.md) for what to check.
 
 **Mode B — Build and run directly on Pi:**
@@ -113,7 +113,7 @@ pux4j/
 ├── pux4j-transform/     Pixel transformation pipeline — pure Java, no JavaFX, no Pi4J
 ├── pux4j-emulator/      JavaFX visual emulator — dev/test only
 ├── pux4j-fx/            JavaFX bridge + SceneContent service interface
-├── pux4j-host/          Generic launcher: hosts a SceneContent app on EInkBridge
+├── pux4j-launcher/      Generic launcher: runs a SceneContent app on EInkBridge
 ├── pux4j-validation/    Interactive hardware validation test
 ├── pux4j-demo/          Reference JavaFX demo app; compiled to JVM + native image
 └── pux4j-native/        GraalVM native shared library — C API via @CEntryPoint
@@ -156,7 +156,7 @@ Interactive 10-step hardware acceptance test. Runs against any `EInkDisplayDrive
 
 Reference JavaFX application. A plain JavaFX app with no knowledge of eInk drivers: `DemoApp`
 is its desktop window, and `DemoContent` (a `SceneContent` service provider) is its UI for
-hosting. `pux4j-host` hosts it on `EInkBridge`; which drivers it runs against (emulator or a
+the launcher. `pux4j-launcher` runs it on `EInkBridge`; which drivers it runs against (emulator or a
 HAT) is decided by what the bundle contains, not by the app.
 
 ### `pux4j-native`

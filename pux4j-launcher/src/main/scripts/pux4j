@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Run a pux4j app on the attached e-paper display (JVM).
+#
+# Usage:
+#   pux4j [<app>] [-D<pux4j property>=<value> ...]
+#   pux4j --list
+#
+# <app> is optional while only one app is installed. Logs to ~/tmp/run-log.txt as well as the
+# terminal. JavaFX needs a display session even though nothing is shown on it; DISPLAY
+# defaults to :0 (override by exporting it first).
+set -euo pipefail
+
+SCRIPT_SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SCRIPT_SOURCE" ]; do
+  SCRIPT_DIR=$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)
+  SCRIPT_SOURCE=$(readlink "$SCRIPT_SOURCE")
+  [[ $SCRIPT_SOURCE != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
+done
+SCRIPT_DIR=$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+case "${1:-}" in
+  -h|--help) grep '^#' "$0" | sed 's/^# \?//'; exit 0 ;;
+esac
+
+JVM_ARGS=()   # -D options
+APP_ARGS=()   # app name, --list
+for arg in "$@"; do
+  case "$arg" in
+    -D*) JVM_ARGS+=("$arg") ;;
+    *)   APP_ARGS+=("$arg") ;;
+  esac
+done
+
+export DISPLAY="${DISPLAY:-:0}"
+mkdir -p "$HOME/tmp"
+
+MODULE_PATH="$(ls "$LIB_DIR"/*.jar | tr '\n' ':')"
+java -Xmx192m \
+    --module-path "$MODULE_PATH" \
+    --enable-native-access=javafx.graphics,com.pi4j.plugin.ffm \
+    "${JVM_ARGS[@]}" \
+    -m dev.pux4j.ui.launcher/dev.pux4j.ui.launcher.EInkLauncher \
+    "${APP_ARGS[@]}" 2>&1 | tee "$HOME/tmp/run-log.txt"

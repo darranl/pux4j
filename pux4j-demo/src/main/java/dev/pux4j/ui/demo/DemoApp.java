@@ -15,7 +15,7 @@ import javafx.stage.StageStyle;
 /**
  * Desktop window for the counter demo, laid out for a 296×128 display. The app itself knows
  * nothing about eInk drivers: to run it on the emulator or a panel, bundle {@link DemoContent}
- * with {@code pux4j-host} and the desired drivers instead.
+ * with {@code pux4j-launcher} and the desired drivers instead.
  *
  * <p>Options: {@code --scale=N} (zoom, default 3.0; 1 is pixel-exact) and {@code --no-bezel}
  * (drop the black eInk-frame border).
