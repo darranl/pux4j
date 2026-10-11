@@ -31,9 +31,13 @@ cd pux4j-ui
 ./pux4j-validation/run-validation-emulator.sh     # interactive validation (mouse = touch)
 ./pux4j-demo/run-demo.sh                          # JavaFX counter demo (plain desktop window)
 ./pux4j-host/run-emulator.sh                      # counter demo through EInkBridge on the emulator
+./pux4j-bridge-smoke/run-demo-check.sh            # headless: counter demo + taps on both panel sizes, PNG frames
 ```
 The emulator is auto-selected on any machine that is not a Raspberry Pi.
-Display profile and scale are set with `--display=ssd1675a` and `--scale=3`.
+Display profile and scale are set with `--display=ssd1675a` and `--scale=3` on the validation
+scripts; `run-emulator.sh` takes them as system properties instead, e.g.
+`./pux4j-host/run-emulator.sh -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4`.
+See [`docs/bridge-demo-verification.md`](docs/bridge-demo-verification.md) for what to check.
 
 **Mode B — Build and run directly on Pi:**
 ```bash

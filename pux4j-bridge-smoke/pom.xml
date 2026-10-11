@@ -42,9 +42,21 @@
             <groupId>dev.pux4j.ui</groupId>
             <artifactId>pux4j-fx</artifactId>
         </dependency>
+        <!-- DemoBridgeCheck hosts the real counter demo (found via ServiceLoader). -->
+        <dependency>
+            <groupId>dev.pux4j.ui</groupId>
+            <artifactId>pux4j-demo</artifactId>
+            <version>${project.version}</version>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-graphics</artifactId>
+            <classifier>${javafx.platform}</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
             <classifier>${javafx.platform}</classifier>
         </dependency>
         <dependency>

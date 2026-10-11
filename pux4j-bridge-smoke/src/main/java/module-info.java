@@ -14,6 +14,8 @@ module dev.pux4j.ui.bridgesmoke {
     requires dev.pux4j.ui.transform;
     requires dev.pux4j.ui.fx;
     requires javafx.graphics;
+    requires javafx.controls;
     requires org.slf4j;
+    uses dev.pux4j.ui.fx.SceneContent;
     requires java.desktop; // ImageIO, for decoding the smoke test's own PNG output back out
 }
