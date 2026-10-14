@@ -19,26 +19,16 @@ import dev.pux4j.ui.transform.RenderSession;
 import dev.pux4j.ui.transform.TransformStrategy;
 import javafx.animation.AnimationTimer;
 import javafx.application.Platform;
-import javafx.event.Event;
-import javafx.event.EventType;
-import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.image.WritableImage;
-import javafx.scene.input.MouseButton;
-import javafx.scene.input.MouseEvent;
-import javafx.scene.input.PickResult;
 import javafx.scene.paint.Color;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.foreign.MemorySegment;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
@@ -113,13 +103,6 @@ public final class EInkBridge {
     CaptureBuffer pollFreeBufferForTest() {
         return freeBuffers.poll();
     }
-
-    /**
-     * Maximum scene-coordinate distance, in pixels, between a press and its matching release
-     * for the pair to still synthesize a {@code MOUSE_CLICKED} — "within a few pixels of the
-     * press", per the design doc's Event injection section.
-     */
-    private static final double CLICK_TOLERANCE_PX = 4.0;
 
     private final Pux4jContext context;
     private final EInkDisplayDriver display;
@@ -279,19 +262,17 @@ public final class EInkBridge {
     };
 
     /**
-     * Per-contact touch state (pressed node, press position, last known position). Read and
-     * written only from inside {@link #injectTouches} and the methods it calls, which always
-     * run on the FX thread (reached via {@code Platform.runLater()}) — the touch thread itself
-     * never touches this map, so it needs no synchronization on that account. {@link #start}
-     * clears it before the threads start (safe: nothing is running yet); {@link #stop}
-     * deliberately does <em>not</em> touch it directly — see {@link #stop}'s javadoc on why
-     * only {@code scene} is cleared there.
+     * Per-contact touch state and event synthesis. Used only from {@link #injectTouches}, which
+     * always runs on the FX thread — the touch thread never touches it. {@link #start} clears it
+     * before the threads start (safe: nothing is running yet); {@link #stop} deliberately does
+     * <em>not</em> touch it directly — see {@link #stop}'s javadoc on why only {@code scene} is
+     * cleared there.
      */
-    private final Map<Integer, ContactState> activeContacts = new HashMap<>();
+    private final TouchInjector touchInjector = new TouchInjector();
 
     /**
-     * Mirrors {@code !activeContacts.isEmpty()}, but readable from the touch thread (which
-     * cannot safely read {@link #activeContacts} itself) — lets {@link #runTouchLoop} decide
+     * Mirrors {@link TouchInjector#hasActiveContacts()}, but readable from the touch thread (which
+     * cannot safely read the injector's contact map itself) — lets {@link #runTouchLoop} decide
      * whether an empty poll still needs dispatching to the FX thread, for contacts that lift
      * by disappearing from the report rather than by an explicit {@code down=false} point
      * (see {@link #injectTouches}'s javadoc).
@@ -806,7 +787,7 @@ public final class EInkBridge {
         warnIfFillNotOpaque(scene);
 
         this.scene = scene;
-        activeContacts.clear();
+        touchInjector.clear();
         hasActiveContacts.set(false);
         hasCaptured = false;
 
@@ -1298,13 +1279,6 @@ public final class EInkBridge {
     // -------------------------------------------------------------------------
 
     /**
-     * A contact's dispatch state: the node it was pressed on (or {@code null} if the press
-     * hit nothing), its press position (for {@link #CLICK_TOLERANCE_PX} on release), and its
-     * last known position (to detect movement between polls, for {@code MOUSE_DRAGGED}).
-     */
-    private record ContactState(Node pressedNode, double pressX, double pressY, double lastX, double lastY) {}
-
-    /**
      * Package-private for tests (CP3). Polls {@link TouchDriver#readTouches()} and dispatches each batch to the FX thread. An
      * empty poll is normally dispatched as nothing — except when {@link #hasActiveContacts} says
      * a contact is still tracked as down, in which case the empty poll is dispatched anyway so
@@ -1374,115 +1348,19 @@ public final class EInkBridge {
     }
 
     /**
-     * Dispatches one poll's worth of already-logical-space contacts as synthetic mouse
-     * events. Always runs on the FX thread (only ever invoked via {@code Platform.runLater()}
-     * from {@link #runTouchLoop}), so {@link #activeContacts} needs no synchronization.
-     *
-     * <p>Not every touch IC reports a lift as an explicit {@code down=false} point — the
-     * GT1151Q (2.13" HAT) signals it purely by the contact disappearing from the next report,
-     * while the ICNT86X (2.9" HAT) does send an explicit {@code down=false}. Both must work:
-     * after dispatching everything {@code contacts} reports, any id still in
-     * {@link #activeContacts} that wasn't in this batch is inferred to have lifted, and its
-     * release is synthesized at its last known position. Without this, a GT1151Q press would
-     * never see a {@code MOUSE_RELEASED}/{@code MOUSE_CLICKED} at all, and the stale
-     * {@link ContactState} would misdispatch the next unrelated tap sharing that contact id as
-     * a drag of the first press's node.
+     * Dispatches one poll's already-logical-space contacts through {@link #touchInjector}.
+     * Always runs on the FX thread (only ever invoked via {@code Platform.runLater()} from
+     * {@link #runTouchLoop}), so the injector needs no synchronization. See
+     * {@link TouchInjector} for the two lift paths (explicit {@code down=false} and a contact
+     * disappearing from the report).
      */
     private void injectTouches(List<TouchPoint> contacts) {
         Scene currentScene = scene;
         if (currentScene == null) {
             return; // stopped between the poll and this runLater turn running
         }
-        Set<Integer> reportedIds = new HashSet<>();
-        for (TouchPoint p : contacts) {
-            reportedIds.add(p.id());
-            if (p.down()) {
-                dispatchDownContact(currentScene, p);
-            } else {
-                dispatchUpContact(currentScene, p);
-            }
-        }
-        if (!activeContacts.isEmpty()) {
-            for (Integer id : List.copyOf(activeContacts.keySet())) {
-                if (!reportedIds.contains(id)) {
-                    ContactState state = activeContacts.remove(id);
-                    releaseContact(currentScene, state, state.lastX(), state.lastY());
-                }
-            }
-        }
-        hasActiveContacts.set(!activeContacts.isEmpty());
-    }
-
-    /** New contact → {@code MOUSE_PRESSED} at the picked node (if any). Existing contact that
-     * moved since the last poll → {@code MOUSE_DRAGGED} at its pressed node (if any); a
-     * contact that hasn't moved is left alone (no event). */
-    private void dispatchDownContact(Scene currentScene, TouchPoint p) {
-        ContactState state = activeContacts.get(p.id());
-        if (state == null) {
-            Node target = ScenePicker.pick(currentScene, p.x(), p.y());
-            if (target != null) {
-                fireMouseEvent(target, MouseEvent.MOUSE_PRESSED, p.x(), p.y());
-            }
-            activeContacts.put(p.id(), new ContactState(target, p.x(), p.y(), p.x(), p.y()));
-        } else if (p.x() != state.lastX() || p.y() != state.lastY()) {
-            if (state.pressedNode() != null) {
-                fireMouseEvent(state.pressedNode(), MouseEvent.MOUSE_DRAGGED, p.x(), p.y());
-            }
-            activeContacts.put(p.id(),
-                    new ContactState(state.pressedNode(), state.pressX(), state.pressY(), p.x(), p.y()));
-        }
-    }
-
-    /** Explicit {@code down=false} point (ICNT86X-style lift) — releases at the reported
-     * position. See {@link #injectTouches}'s javadoc for the other (GT1151Q-style) lift path. */
-    private void dispatchUpContact(Scene currentScene, TouchPoint p) {
-        ContactState state = activeContacts.remove(p.id());
-        if (state != null) {
-            releaseContact(currentScene, state, p.x(), p.y());
-        }
-    }
-
-    /**
-     * {@code MOUSE_RELEASED} at {@code state}'s pressed node, plus {@code MOUSE_CLICKED} if
-     * the release lands back on that same node within {@link #CLICK_TOLERANCE_PX} of the
-     * original press position (not the last drag position — a slow drag back to the start
-     * shouldn't register as a click). Shared by both lift paths in {@link #dispatchUpContact}
-     * and {@link #injectTouches}'s inferred-release handling, which differ only in where the
-     * release position comes from (an explicit point vs. the contact's last known position).
-     */
-    private void releaseContact(Scene currentScene, ContactState state, double releaseX, double releaseY) {
-        if (state.pressedNode() == null) {
-            return;
-        }
-        fireMouseEvent(state.pressedNode(), MouseEvent.MOUSE_RELEASED, releaseX, releaseY);
-
-        double distanceFromPress = Math.hypot(releaseX - state.pressX(), releaseY - state.pressY());
-        Node releaseTarget = ScenePicker.pick(currentScene, releaseX, releaseY);
-        if (releaseTarget == state.pressedNode() && distanceFromPress <= CLICK_TOLERANCE_PX) {
-            fireMouseEvent(state.pressedNode(), MouseEvent.MOUSE_CLICKED, releaseX, releaseY);
-        }
-    }
-
-    /**
-     * Fires a synthetic mouse event at {@code target} via manual pick + {@code
-     * Event.fireEvent} (JavaFX exposes no public pick API — see {@link ScenePicker}), giving
-     * correct capture/bubble dispatch along the node's parent chain. {@code synthesized} is
-     * {@code true} (this really is synthesized from touch input — code that specifically
-     * branches on {@link MouseEvent#isSynthesized()} will see that). Known, documented
-     * limitations of this synthetic path that remain (see the design doc's Event injection
-     * section): no {@code :hover} pseudo-class, no cursor changes, {@code stillSincePress} is
-     * always reported {@code true} rather than tracked precisely, and — since the bridge runs
-     * stage-less — screen coordinates are approximated as scene coordinates.
-     */
-    private static void fireMouseEvent(Node target, EventType<MouseEvent> type, double x, double y) {
-        boolean primaryDown = type == MouseEvent.MOUSE_PRESSED || type == MouseEvent.MOUSE_DRAGGED;
-        MouseEvent event = new MouseEvent(
-                type, x, y, x, y, MouseButton.PRIMARY, 1,
-                false, false, false, false,
-                primaryDown, false, false,
-                true, false, true,
-                new PickResult(target, x, y));
-        Event.fireEvent(target, event);
+        touchInjector.inject((x, y) -> ScenePicker.pick(currentScene, x, y), contacts);
+        hasActiveContacts.set(touchInjector.hasActiveContacts());
     }
 
     /**
