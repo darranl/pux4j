@@ -88,20 +88,49 @@ fired when no node is hit; a click only when released on the pressed node within
 | `ContextMenuEvent` (long press) | Not emitted — **deviation** (D3) | Also platform-generated; needs a hold timer, and a panel refresh takes ~0.5–1 s, so the user cannot see the menu appear in time to trust the gesture. |
 | `KeyEvent`, key focus traversal, text input | Out of scope | No keyboard. Focus follows `requestFocus()` calls made by controls on mouse press, which works. |
 
-### `clickCount`, `stillSincePress`
+### Contact model, `clickCount`, `stillSincePress`
 
-Tracked as `Scene.ClickGenerator` does: a counter incremented on each press that follows the
-previous one within the multi-click time and distance, reset otherwise; `stillSincePress` is false
-once the contact has moved beyond the multi-click distance since press (compared per axis, as in
-JavaFX). This state belongs to the **gesture / mouse pointer**, not to one contact: a double tap
-needs the previous tap's press time and position after that contact's own state is gone. JavaFX
-takes time and distance from the platform toolkit; the bridge has no toolkit, so it uses the
-Monocle defaults, 500 ms and 20 px per axis, as internal constants (not public configuration until an
-app needs to change them). The same distance is the `DRAG_DETECTED` threshold, and, as with
-Monocle's `SmallMoveTouchFilter`, a move within it is not reported as movement at all — on an
-e-ink panel every `MOUSE_DRAGGED` can trigger handlers and a refresh. Time comes from a monotonic
-clock sampled **when the poll is read**, not on the FX thread (whose stalls would distort it),
-and not from a `Timeline`, because the bridge may run without pulses.
+The raw-contact → touch-set/pointer step is a toolkit-free class driven by the caller's clock and
+run on the touch thread, so a throwing app handler on the FX thread cannot corrupt it and the FX
+thread is only woken when something changed (a GT1151Q finger replayed every poll produces
+nothing). Its rules, modelled on Monocle's touch filters and `Scene.ClickCounter`:
+
+- **Three positions per contact:** the last *reading*, the last *passed-on* position (the
+  dead-band anchor) and the press. Releases land at the passed-on position, so a
+  `MOUSE_RELEASED` is never up to a dead-band away from the last `MOUSE_DRAGGED`.
+- **Dead-band (Monocle `SmallMoveTouchFilter`):** a reading less than 20 px (straight line, strict)
+  from the last passed-on position is dropped; the anchor moves only when a reading is passed
+  on, so a slow drag still arrives. Touch `MOVED`/`STATIONARY` and the pointer position are both
+  derived from the filtered position. A separate constant from the multi-click distance, since
+  the dead-band is the one to tune on hardware; each reported move can cost an e-ink refresh.
+- **Identity:** when the set of raw ids is unchanged, a contact is its raw id; when it changes
+  (a lift, a renumbering chip, an id reused for a new finger), readings and contacts are paired
+  by nearest position (as Monocle's `AssignPointIDTouchFilter`), unpaired contacts lift and
+  unpaired readings press. Explicit `down=false` is a definite lift and is never re-paired.
+  Duplicate raw ids in one report keep the last (logged); `down=false` for an unknown id is
+  ignored.
+- **Jump rule:** a pairing is only accepted within 20 px plus 10 px per millisecond since the
+  contact's last reading — time-aware, because the bridge does not read the chip while the FX
+  thread is busy, so the gap can be hundreds of ms. Beyond it, the contact is released and a new
+  one pressed. Starting values, to be tuned from captures of real two-finger lifts and fast swipes.
+- **Mouse button, primary, one-poll cases:** the button goes down with the first contact and up
+  with the last. If the only contact lifts and another presses in the same poll (a jump), the
+  button stays down and the pointer moves (`MOUSE_DRAGGED`, no click), as in Monocle.
+- **`clickCount` / `stillSincePress` (JavaFX `ClickCounter`):** 500 ms and 20 px per axis. The
+  "out" flag is *sticky*: once the pointer leaves the box around the last press at any point (or
+  500 ms pass), the next press restarts the count at 1, even if the pointer came back. This state
+  belongs to the pointer, not a contact, and survives the end of the gesture. **Deviation:**
+  `stillSincePress` is reported `true` on the press itself (JavaFX reports the previous gesture's
+  value there). Every pointer result while pressed and at release carries `clickCount` and
+  `stillSincePress`, as `ClickGenerator` puts them on `DRAGGED`/`RELEASED`/`CLICKED`.
+- **Drag detect:** the model reports the *default* — per axis from the mouse press (the first
+  contact's press, which stays the reference after the primary is reassigned), strictly more
+  than 20 px. Whether `DRAG_DETECTED` has already fired is the FX consumer's state, because a
+  handler can force it with `setDragDetect(true)`, even on the press.
+- **`MOUSE_MOVED`:** the pointer position persists across gestures, so a press at the previous
+  release position needs no move.
+- **Time:** monotonic clock sampled right after the read, not on the FX thread and not a
+  `Timeline`.
 
 ### Ordering for one poll
 
@@ -123,9 +152,8 @@ Monocle `:hover` stays set after the lift (no pointer-leave is sent); the bridge
 
 - Raw contact ids from the driver (the GT1151Q reuses and re-numbers them) are **remapped** to
   JavaFX-style ids: 1, 2, … within a gesture, not reused until every contact has lifted.
-- A contact that appears to **jump** farther than a plausible move within one poll is treated as a
-  release plus a new press: the GT1151Q may renumber the remaining contact after a lift, or hand a
-  freed id to a new finger between two polls.
+- Identity comes from the contact model above (nearest-position pairing and the time-aware jump
+  rule), not from raw ids: the GT1151Q renumbers contacts and the ICNT86X's id is an array index.
 - Points within a set are ordered by remapped id.
 - Each event gets a **fresh** `TouchPoint` list. `TouchEvent.copyFor` mutates shared points in place
   and the code that resets them (`TouchPointHelper`) is internal. Each fresh point starts grabbed
@@ -133,7 +161,7 @@ Monocle `:hover` stays set after the lift (no pointer-leave is sent); the bridge
 - A lift **inferred** from a contact missing in a report (GT1151Q) goes into the *same* set as the
   rest of that poll; an empty poll with only inferred releases still produces a set of releases;
   no set is emitted when nothing changed.
-- Event-set id: increments per set, reset to 0 after the last contact lifts.
+- Event-set id: increments per set (the first set is 1, as `Scene` increments before use), reset to 0 after the last contact lifts.
 - After each set, read `getGrabbed()` back from every copy and merge grab changes into the bridge's
   per-contact state: the last copy whose value differs from its starting value wins.
 
@@ -186,7 +214,10 @@ path, export `com.sun.javafx.scene` to the test module. Coverage:
 - Handler `grab`/`ungrab`; consumed events; `setDragDetect` read back.
 - Hover while pressed: dragging off a `Button` exits it and disarms it; dragging back re-arms.
 - Primary reassignment when the primary lifts first; mouse button down until the last lift.
-- A jump in a contact's position becomes release + press.
+- The contact-model cases: slow drag arrives; exactly 20 px is outside the dead-band; renumbered
+  survivor keeps its identity (ICNT86X index shift); implausible jump = release + press with the
+  button held; the same distance after a long gap is a move; raw id 0; duplicate and unknown ids;
+  five contacts; sticky click-out; a double tap; no `MOUSE_MOVED` before a repeat tap in place.
 - A handler that throws (including `startFullDrag()`) does not leave contact state stale or stop
   the next poll being dispatched.
 - Contact over nothing targets the `Scene` (touch and mouse); pressed node removed mid-gesture.
