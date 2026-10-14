@@ -3,7 +3,6 @@ package dev.pux4j.ui.dice.demo;
 
 import javafx.application.Application;
 import javafx.application.Platform;
-import javafx.fxml.FXMLLoader;
 import javafx.scene.Group;
 import javafx.scene.Scene;
 import javafx.scene.control.ContextMenu;
@@ -14,21 +13,18 @@ import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 
 /**
- * Yahtzee-style dice rolling demo application for pux4j.
+ * Desktop window for the dice demo, laid out for a 296×128 display. The app itself knows
+ * nothing about eInk drivers: to run it on the emulator or a panel, bundle {@link DiceContent}
+ * with {@code pux4j-launcher} and the desired drivers instead.
  *
- * <p>Uses the same display architecture as the counter demo:
- * <ul>
- *   <li>{@code pux4j.display.scale} — zoom factor (default 3.0)</li>
- *   <li>{@code pux4j.display.bezel} — black eInk-frame border (default true)</li>
- * </ul>
+ * <p>Options: {@code --scale=N} (zoom, default 3.0; 1 is pixel-exact) and {@code --no-bezel}
+ * (drop the black eInk-frame border).
  */
 public final class DiceDemoApp extends Application {
 
     private static final int DISPLAY_WIDTH  = 296;
     private static final int DISPLAY_HEIGHT = 128;
     private static final int BEZEL_SIZE     = 24;
-    private static final int FRAME_WIDTH    = DISPLAY_WIDTH  + 2 * BEZEL_SIZE;
-    private static final int FRAME_HEIGHT   = DISPLAY_HEIGHT + 2 * BEZEL_SIZE;
 
     @Override
     public void start(Stage stage) throws Exception {
@@ -44,19 +40,19 @@ public final class DiceDemoApp extends Application {
             }
         }
 
-        var loader = new FXMLLoader(getClass().getResource("dice-demo.fxml"));
-        StackPane fxmlRoot = loader.load();
-
-        if (!showBezel) {
-            fxmlRoot.getStyleClass().remove("eink-frame");
+        StackPane root = new DiceContent().createRoot();
+        if (showBezel) {
+            root.getStyleClass().add("eink-frame");
         }
+        int bezel  = showBezel ? BEZEL_SIZE : 0;
+        int frameW = DISPLAY_WIDTH  + 2 * bezel;
+        int frameH = DISPLAY_HEIGHT + 2 * bezel;
+        // The FXML fixes no size; the Group lays the root out at its pref size.
+        root.setPrefSize(frameW, frameH);
 
-        var scaledRoot = new Group(fxmlRoot);
+        var scaledRoot = new Group(root);
         scaledRoot.getTransforms().add(new Scale(scale, scale, 0, 0));
-
-        int sceneW = showBezel ? FRAME_WIDTH  : DISPLAY_WIDTH;
-        int sceneH = showBezel ? FRAME_HEIGHT : DISPLAY_HEIGHT;
-        var scene  = new Scene(scaledRoot, sceneW * scale, sceneH * scale);
+        var scene = new Scene(scaledRoot, frameW * scale, frameH * scale);
 
         var exitItem = new MenuItem("Exit");
         exitItem.setOnAction(e -> Platform.exit());

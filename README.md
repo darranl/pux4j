@@ -32,6 +32,7 @@ cd pux4j-ui
 ./pux4j-demo/run-demo.sh                          # JavaFX counter demo (plain desktop window)
 ./pux4j-launcher/run-emulator.sh [<app>]            # counter demo through EInkBridge on the emulator
 ./pux4j-bridge-smoke/run-demo-check.sh            # headless: counter demo + taps on both panel sizes, PNG frames
+./pux4j-bridge-smoke/run-dice-check.sh            # headless: dice demo, plays a whole turn on both panel sizes
 ```
 The emulator is auto-selected on any machine that is not a Raspberry Pi.
 Display profile and scale are set with `--display=ssd1675a` and `--scale=3` on the validation

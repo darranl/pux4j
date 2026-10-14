@@ -38,8 +38,8 @@ public final class DiceController implements Initializable {
     private enum GameState { CLEARED, ROLLED_1, ROLLED_2, ROLLED_3 }
 
     private static final int    DIE_COUNT    = 5;
-    /** Native display width in eInk pixels — matches DiceDemoApp and FXML prefWidth. */
-    private static final double DISPLAY_WIDTH = 296.0;
+    /** Die size used until the first layout pass reports the real width. */
+    private static final double INITIAL_DIE_SIZE = 50.0;
 
     @FXML private HBox   diceBox;
     @FXML private Button clearBtn;
@@ -55,8 +55,9 @@ public final class DiceController implements Initializable {
 
     @Override
     public void initialize(URL url, ResourceBundle rb) {
-        // Initial die size: width split evenly; height matches width for square faces.
-        double dieSize = DISPLAY_WIDTH / DIE_COUNT;
+        // Provisional size; the widthProperty listener below sets the real square size from
+        // the laid-out width, so the demo fits whatever panel width hosts it.
+        double dieSize = INITIAL_DIE_SIZE;
 
         diceBox.setAlignment(Pos.CENTER_LEFT);
         diceBox.setFillHeight(false);
@@ -82,14 +83,16 @@ public final class DiceController implements Initializable {
             HBox.setHgrow(die, Priority.ALWAYS);
         }
 
-        // Recompute square die size from actual layout width when available.
+        // Square die size from the actual layout width.
         diceBox.widthProperty().addListener((obs, o, newW) -> resizeDice(newW.doubleValue()));
 
         updateButtons();
     }
 
     private void resizeDice(double boxWidth) {
-        double sz = boxWidth / DIE_COUNT;
+        // Floor, not exact: layout snaps minimum sizes up to whole pixels, so 296/5 = 59.2 would
+        // become 60 and the row would be 4 px wider than the display.
+        double sz = Math.floor(boxWidth / DIE_COUNT);
         for (DieView die : dice) {
             die.setPrefSize(sz, sz);
             die.setMinSize(sz, sz);
