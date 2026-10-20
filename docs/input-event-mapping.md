@@ -1,7 +1,8 @@
 # Input-event mapping: touch → JavaFX events
 
-**Status: agreed design (revised after a review against the Monocle sources), not yet implemented.** Until it is, `EInkBridge` still emits only the four
-synthesized mouse events described under "Today".
+**Status: the mouse stream is implemented; `TouchEvent` sets are not yet.** The design was revised
+after a review against the Monocle and `Scene` sources. Until touch sets land, `EInkBridge` emits the
+mouse events below but no `TouchEvent`s.
 
 `EInkBridge` turns touch contacts from a panel into JavaFX input events. The rule is
 **fidelity to JavaFX**: an ordinary JavaFX application, unaware of eInk, should see the events and
@@ -62,12 +63,12 @@ builds against 23.0.1 and this machinery is long-standing. What happens *before*
   - *Multi-click:* 500 ms and 20 px on each axis by default; the same distance feeds click
     counting and `stillSincePress`.
 
-## Today (before this design is implemented)
+## Today
 
-`MOUSE_PRESSED/DRAGGED/RELEASED/CLICKED` at the picked node for **every** contact, `synthesized =
-true`, `clickCount = 1`, `stillSincePress = true`, `PickResult` fixed to the pressed node; nothing
-fired when no node is hit; a click only when released on the pressed node within 4 px. No
-`TouchEvent`s, no enter/exit, no `MOUSE_MOVED`, no `DRAG_DETECTED`.
+The mouse stream follows this document: one pointer from the primary contact, `MOUSE_MOVED`,
+`PRESSED`, `DRAGGED`, `DRAG_DETECTED`, `RELEASED`, `CLICKED` and the `_TARGET` enter/exit chains, with
+the `Scene` as the target over empty space. No `TouchEvent`s yet (touch sets and grabs are the
+remaining piece).
 
 ## Mapping
 
@@ -79,10 +80,10 @@ fired when no node is hit; a click only when released on the pressed node within
 | `DRAG_DETECTED` | **Emit** (new) | Once per gesture at the press target, first drag beyond the hysteresis. Needed for `setOnDragDetected`/`startFullDrag` apps. |
 | `MOUSE_ENTERED_TARGET` / `MOUSE_EXITED_TARGET` | **Emit** (new, D1) | Per node in the target hierarchy (incl. `Scene`), outermost first, entered before `PRESSED`, exited after `CLICKED`. `_TARGET` only — plain `MOUSE_ENTERED`/`EXITED` is derived by each node's dispatcher, never fired by the bridge. Gives `:hover` for the duration of the touch. |
 | `:pressed` / `:hover` | Reproduced | Via the dispatch-chain preprocessing above; nothing extra to do, provided events are not consumed (same as JavaFX). |
-| `MOUSE_MOVED` | **Emit** (new) | Monocle moves the pointer to a contact's position before pressing; the bridge fires one at the new primary position before `MOUSE_PRESSED` (and when the primary is reassigned), only when the position changed. Never fired between gestures — a lifted finger leaves no pointer. |
-| Events with nothing under the contact | **Emit at the `Scene`** (changed) | JavaFX targets the `Scene`; scene-level handlers (`scene.setOnMousePressed`) fire. Today dropped (`releaseContact` returns early too). |
-| Pressed node removed mid-gesture | **Handle** (new) | JavaFX sends `MOUSE_EXITED_TARGET` down the removed part of the chain, clears `:pressed` (an internal setter) and retargets to the nearest remaining ancestor. The bridge does the same except `:pressed` on the removed nodes, which it cannot clear through public API; they are out of the scene, so nothing renders it, and it is not re-sent to them. Detected when the next event for the contact finds the target no longer in the scene. |
-| Disabled / invisible / mouse-transparent nodes | Faithful | `ScenePicker` already skips them as `Node.pickNode` does. |
+| `MOUSE_MOVED` | **Emit** (new) | Monocle moves the pointer to a contact's position before pressing; the bridge fires one at the new primary position before `MOUSE_PRESSED`, only when the position changed (`button = NONE`, `clickCount = 0`, carrying the previous gesture's `stillSincePress` — false if this move leaves the 20 px box around that press, as `ClickCounter.moved` is applied first). While the button is held a move is `MOUSE_DRAGGED`, including when the primary is reassigned. Never fired between gestures — a lifted finger leaves no pointer. |
+| Events with nothing under the contact | **Emit at the `Scene`** (changed) | JavaFX targets the `Scene`; scene-level handlers (`scene.setOnMousePressed`) fire. The `PickResult` has no node. |
+| Pressed node removed mid-gesture | **Handle** (new) | JavaFX sends `MOUSE_EXITED_TARGET` to the entered nodes up to the removed one (innermost first), clears `:pressed` (an internal setter) and retargets to the nearest remaining ancestor. The bridge does the same except `:pressed` on the removed nodes, which it cannot clear through public API; they are out of the scene, so nothing renders it, and it is not re-sent to them. Detected on the next event, structurally: a node in the recorded press hierarchy that is no longer a child of the next one (so re-parenting counts as removal, as in JavaFX), or a root that is no longer the scene's root. `toFront()`/`toBack()` do not count. A node that becomes disabled or invisible mid-press stays the press target, as in JavaFX. |
+| Disabled / invisible / mouse-transparent nodes, `viewOrder`, clips | Faithful | `ScenePicker` skips them as `Node.pickNode` does, orders siblings by `viewOrder` then position, and excludes a clipped node's subtree outside its clip. 3D picking is not modelled. |
 | `MouseDragEvent` (full press-drag-release), drag-and-drop | Not emitted — **deviation** | Needs the internal `Scene` handler (D2). `DRAG_DETECTED` is still fired (apps use it for their own drag tracking), but a handler calling `startFullDrag()`/`startDragAndDrop()` fails (they need the scene's drag gesture). The bridge catches and logs that per event and carries on; such apps are not supported. |
 | `ScrollEvent` / `SwipeEvent` / `ZoomEvent` / `RotateEvent` (direct gestures) | Not emitted — **deviation** | On real JavaFX these come from the platform's gesture recogniser, not the scene; there is nothing in `Scene` to align with, so a recogniser would be a new design. Add when an app on a panel this size needs one. |
 | `ContextMenuEvent` (long press) | Not emitted — **deviation** (D3) | Also platform-generated; needs a hold timer, and a panel refresh takes ~0.5–1 s, so the user cannot see the menu appear in time to trust the gesture. |
@@ -139,10 +140,17 @@ Following Monocle, per poll batch the **whole touch set is posted first, then th
 
 1. Touch set: one `TOUCH_PRESSED`/`MOVED`/`STATIONARY`/`RELEASED` per contact, all carrying the
    whole set.
-2. Mouse stream, from the single pointer: `MOUSE_MOVED` to the primary position if changed; on the
-   first contact down, the `MOUSE_ENTERED_TARGET` chain then `MOUSE_PRESSED`; while held,
-   `MOUSE_DRAGGED` (only beyond the dead-band) and `DRAG_DETECTED` once; when the last contact
-   lifts, `MOUSE_RELEASED`, `MOUSE_CLICKED`, then the `MOUSE_EXITED_TARGET` chain.
+2. Mouse stream, from the single pointer. As in `Scene.MouseHandler.process`, **every** event is
+   preceded by its enter/exit handling (against the node picked at that position), and then
+   delivered: on the first contact down, `MOUSE_ENTERED_TARGET` chain, `MOUSE_MOVED` (if the
+   position changed), `MOUSE_PRESSED`; while held, `MOUSE_DRAGGED` (only beyond the dead-band;
+   the press-hierarchy filter applies to the enter/exit) and `DRAG_DETECTED` once, after the
+   drag that triggers it; when the last contact lifts, `MOUSE_RELEASED`, `MOUSE_CLICKED`, then
+   the `MOUSE_EXITED_TARGET` chain.
+3. `DRAG_DETECTED`: as `Scene` does, the default is set on the event *before* it is fired
+   (false for `PRESSED`; the per-axis distance for `DRAGGED`, false once already fired), the
+   handlers run, and the flag is read back afterwards, so a handler can force or suppress it,
+   even on the press.
 
 The enter chain belongs to the mouse stream, so it follows `TOUCH_PRESSED`. **Deviation:** on
 Monocle `:hover` stays set after the lift (no pointer-leave is sent); the bridge exits after
@@ -175,6 +183,13 @@ Monocle `:hover` stays set after the lift (no pointer-leave is sent); the bridge
 | `MOUSE_EXITED_TARGET` chain after `MOUSE_CLICKED` | A touch surface has no pointer to leave; Monocle leaves `:hover` set. |
 | Small moves are suppressed | Monocle does the same (`SmallMoveTouchFilter`); on e-ink each drag event can cost a refresh. |
 | `:pressed` not cleared on a node removed mid-gesture | Setter is internal; see the table. |
+| A node removed and re-added under the same parent between two events is not treated as removed | JavaFX retargets immediately on the removal; the bridge only compares the hierarchy at the next event, so it sees an unchanged one. A node removed and re-added *within* one handler therefore keeps its press target. |
+| No re-pick after the release | JavaFX clears the press hierarchy and re-runs enter/exit unfiltered at the release point, so nodes held back during the drag get `MOUSE_ENTERED_TARGET` there. The bridge goes straight to exiting everything (a touch surface has no pointer to leave), so those nodes never see an enter/exit pair. |
+| A gesture whose release never arrives is abandoned on the next press | Only possible after a lost dispatch or a failed poll. The bridge releases it at the press target with no click and exits everything, so `:pressed`/`:hover` cannot stick; JavaFX has no such case. |
+| `MOUSE_EXITED_TARGET` for a removed node fires after it is detached | JavaFX fires it before the node leaves its parent, so it bubbles to the surviving ancestors; ours does not, because the removal is only noticed on the next event. |
+| A throwing handler does not abort the rest of the poll | `Scene` lets the exception escape its mouse processing, which would skip e.g. `MOUSE_CLICKED` and leave gesture state stale. The bridge passes the exception to the FX thread's uncaught-exception handler (where applications expect handler exceptions to end up) and carries on. |
+| Screen coordinates equal scene coordinates | The bridge has no stage or window. |
+| `stillSincePress` is `true` on the press itself | JavaFX reports the previous gesture's value there (see above). |
 | Controls behave as on a desktop | `ScrollPane` etc. consume `TOUCH_*` and switch on the platform's `IS_TOUCH_SUPPORTED`, which is false for this bridge. Whatever events arrive, those controls follow the desktop path. |
 | Mouse synthesis model | Modelled on Monocle; desktop glass ports may order or synthesize differently. |
 
@@ -193,10 +208,13 @@ Monocle `:hover` stays set after the lift (no pointer-leave is sent); the bridge
 
 ## Testing
 
-Tests that need no toolkit (contact tracking, id remapping, set diffing, inferred lifts, primary
-selection, dead-band, click counting against a supplied clock) run in the `pux4j-fx` unit tests.
-Tests that need a real `Scene` or controls (event order, `:pressed`/`:hover`, `Button`, Scene
-fallback, removal) and the oracle run in the bridge-smoke module, which already needs a display.
+Tests that need no toolkit run in the `pux4j-fx` unit tests: contact tracking, id remapping, set
+diffing, inferred lifts, primary selection, dead-band and click counting against a supplied
+clock, and the mouse synthesis itself against a detached node tree with a stub in place of the
+`Scene` (event order, `_TARGET` chains, `:pressed`/`:hover`, click target, `DRAG_DETECTED`,
+removal, re-parenting, throwing handlers, empty-space fallback to the top target). Tests that
+need a real `Scene` or controls (`Button` arming and `onAction`, the `Scene` itself as the
+target) and the oracle run in the bridge-smoke module, which already needs a display.
 The oracle can only compare **mouse** events (`Scene.processTouchEvent` is private) and must avoid
 timing-dependent fields (`clickCount` derives from a `Timeline`). The test classpath is the plain
 classpath, so `SceneHelper` is reachable without extra `--add-exports`; if tests move to the module

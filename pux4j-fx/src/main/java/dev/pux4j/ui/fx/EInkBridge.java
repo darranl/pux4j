@@ -262,22 +262,20 @@ public final class EInkBridge {
     };
 
     /**
-     * Per-contact touch state and event synthesis. Used only from {@link #injectTouches}, which
-     * always runs on the FX thread — the touch thread never touches it. {@link #start} clears it
-     * before the threads start (safe: nothing is running yet); {@link #stop} deliberately does
-     * <em>not</em> touch it directly — see {@link #stop}'s javadoc on why only {@code scene} is
-     * cleared there.
+     * Raw contacts → touch sets and one mouse pointer. Used only from {@link #runTouchLoop}, i.e.
+     * the touch thread, which owns it; {@link #start} resets it before the thread starts and
+     * {@link #stop} leaves it alone. A {@link ContactSet.PollResult} is immutable, so it is handed
+     * to the FX thread as is.
      */
-    private final TouchInjector touchInjector = new TouchInjector();
+    private final ContactSet contactSet = new ContactSet();
 
     /**
-     * Mirrors {@link TouchInjector#hasActiveContacts()}, but readable from the touch thread (which
-     * cannot safely read the injector's contact map itself) — lets {@link #runTouchLoop} decide
-     * whether an empty poll still needs dispatching to the FX thread, for contacts that lift
-     * by disappearing from the report rather than by an explicit {@code down=false} point
-     * (see {@link #injectTouches}'s javadoc).
+     * Mouse events from the pointer in each {@link ContactSet.PollResult}. Used only from {@link
+     * #injectTouches}, which always runs on the FX thread. Created in {@link #start} (it needs the
+     * scene) before the threads start; {@link #stop} deliberately does <em>not</em> touch it — see
+     * {@link #stop}'s javadoc on why only {@code scene} is cleared there.
      */
-    private final AtomicBoolean hasActiveContacts = new AtomicBoolean(false);
+    private MouseSynthesizer mouseSynthesizer;
 
     private volatile Scene scene;
     private volatile Thread displayThread;
@@ -787,8 +785,8 @@ public final class EInkBridge {
         warnIfFillNotOpaque(scene);
 
         this.scene = scene;
-        touchInjector.clear();
-        hasActiveContacts.set(false);
+        contactSet.clear();
+        mouseSynthesizer = new MouseSynthesizer(scene);
         hasCaptured = false;
 
         displayThread = Thread.ofVirtual().name("eink-display").start(this::runDisplayLoop);
@@ -997,7 +995,7 @@ public final class EInkBridge {
      * they can never accidentally satisfy a {@link #resetRequestedSeq} check. Package-private
      * (not {@code private}) so tests can construct one directly and drive
      * {@link #processRenderWork} without going through a real scene snapshot — snapshotting
-     * needs a live {@code Scene}, which (see {@link #injectTouches}'s javadoc) needs the JavaFX
+     * needs a live {@code Scene}, which needs the JavaFX
      * toolkit started, which this codebase deliberately doesn't require of its test suite
      * (Q7/Q8 in the design doc — no headless Glass platform until JavaFX 26).
      *
@@ -1279,13 +1277,12 @@ public final class EInkBridge {
     // -------------------------------------------------------------------------
 
     /**
-     * Package-private for tests (CP3). Polls {@link TouchDriver#readTouches()} and dispatches each batch to the FX thread. An
-     * empty poll is normally dispatched as nothing — except when {@link #hasActiveContacts} says
-     * a contact is still tracked as down, in which case the empty poll is dispatched anyway so
-     * {@link #injectTouches} can synthesize its release (see that method's javadoc for why a
-     * lift doesn't always arrive as an explicit {@code down=false} point). A {@link
-     * RuntimeException} from {@code readTouches()} (e.g. a transient I2C fault) is logged and
-     * retried after the idle interval, rather than ending the thread — touch going dead for
+     * Package-private for tests (CP3). Polls {@link TouchDriver#readTouches()}, runs each batch
+     * through {@link #contactSet} and dispatches the result to the FX thread when it is not
+     * empty. The batch is passed to the contact set even when it is empty: a lift that arrives as
+     * a contact missing from the report (see {@link ContactSet}) is only noticed that way. A
+     * {@link RuntimeException} from {@code readTouches()} (e.g. a transient I2C fault) is logged
+     * and retried after the idle interval, rather than ending the thread — touch going dead for
      * the rest of the process on one bad read would be a much worse failure mode than a
      * dropped poll.
      */
@@ -1303,11 +1300,10 @@ public final class EInkBridge {
                 boolean dispatched = false;
                 try {
                     List<TouchPoint> raw = touchDriver.readTouches();
-                    if (!raw.isEmpty()) {
-                        dispatchToFxThread(raw.stream().map(touchMapper::map).toList());
-                        dispatched = true;
-                    } else if (hasActiveContacts.get()) {
-                        dispatchToFxThread(List.of());
+                    ContactSet.PollResult result = contactSet.poll(
+                            raw.stream().map(touchMapper::map).toList(), System.nanoTime());
+                    if (result != ContactSet.PollResult.NONE) {
+                        dispatchToFxThread(result);
                         dispatched = true;
                     }
                 } catch (RuntimeException e) {
@@ -1326,7 +1322,7 @@ public final class EInkBridge {
     }
 
     /**
-     * Hands one poll's contacts to the FX thread; the caller already holds
+     * Hands one poll's result to the FX thread; the caller already holds
      * {@link #touchDispatchPermit}, which the posted task releases once it has run.
      * Batches already read are never dropped or merged, so a press and its release can't be coalesced away; the IC
      * simply isn't read again until the FX thread has caught up (so whether a tap that starts
@@ -1335,12 +1331,12 @@ public final class EInkBridge {
      * throwing, so the permit is then never released — harmless, since {@link #stop()}
      * interrupts the thread out of {@code acquire()}.
      */
-    private void dispatchToFxThread(List<TouchPoint> contacts) {
+    private void dispatchToFxThread(ContactSet.PollResult result) {
         // If the executor throws (toolkit never started), the task was rejected and the caller's
         // finally releases the permit, since it never got as far as marking the dispatch made.
         fxExecutor.accept(() -> {
             try {
-                injectTouches(contacts);
+                injectTouches(result);
             } finally {
                 touchDispatchPermit.release();
             }
@@ -1348,19 +1344,16 @@ public final class EInkBridge {
     }
 
     /**
-     * Dispatches one poll's already-logical-space contacts through {@link #touchInjector}.
-     * Always runs on the FX thread (only ever invoked via {@code Platform.runLater()} from
-     * {@link #runTouchLoop}), so the injector needs no synchronization. See
-     * {@link TouchInjector} for the two lift paths (explicit {@code down=false} and a contact
-     * disappearing from the report).
+     * Synthesizes the mouse events for one poll's pointer via {@link #mouseSynthesizer}. Always
+     * runs on the FX thread (only ever invoked via {@code Platform.runLater()} from
+     * {@link #runTouchLoop}), so the synthesizer needs no synchronization.
      */
-    private void injectTouches(List<TouchPoint> contacts) {
+    private void injectTouches(ContactSet.PollResult result) {
         Scene currentScene = scene;
         if (currentScene == null) {
             return; // stopped between the poll and this runLater turn running
         }
-        touchInjector.inject((x, y) -> ScenePicker.pick(currentScene, x, y), contacts);
-        hasActiveContacts.set(touchInjector.hasActiveContacts());
+        mouseSynthesizer.process(result.pointer(), (x, y) -> ScenePicker.pick(currentScene, x, y));
     }
 
     /**

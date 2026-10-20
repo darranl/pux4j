@@ -7,6 +7,11 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+
 /**
  * Manual hit-testing for synthetic touch injection. JavaFX exposes no public pick API
  * ({@code Scene.pick} is internal) — this walks the scene graph depth-first from the root in
@@ -24,11 +29,11 @@ import javafx.scene.Scene;
  * for). Because all three checks happen before recursion, a node under a failing ancestor is
  * skipped without needing a separate "effective" query — the recursion never reaches it.
  *
- * <p>Known divergence from real JavaFX picking, left undocumented-away rather than fixed:
- * {@link Node#getClip()} is ignored, so a child positioned outside its parent's clip region
- * (e.g. scrolled-away {@code ScrollPane} content) is still pickable there. Not expected to
- * matter for the touch targets this bridge is built for (buttons/controls sized to fit a
- * small eInk panel), but worth knowing if a future application clips content.
+ * <p>Stacking order follows {@code Parent.getOrderedChildren}: children are stable-sorted by
+ * {@link Node#getViewOrder()} (higher values are further back) and picked from the front. A
+ * node's {@link Node#getClip()} excludes the node <em>and its subtree</em> at points outside
+ * the clip shape, as {@code Node.intersectsBounds} does (so scrolled-away {@code ScrollPane}
+ * content is not pickable). Remaining difference: 3D picking (depth, cameras) is not modelled.
  */
 final class ScenePicker {
 
@@ -56,16 +61,37 @@ final class ScenePicker {
         if (!node.isVisible() || node.isDisable() || node.isMouseTransparent()) {
             return null;
         }
+        Point2D local = node.sceneToLocal(sceneX, sceneY);
+        if (local == null) {
+            return null;
+        }
+        Node clip = node.getClip();
+        if (clip != null) {
+            Point2D inClip = clip.parentToLocal(local);
+            if (inClip == null || !clip.contains(inClip)) { // null: non-invertible clip transform
+                return null;
+            }
+        }
         if (node instanceof Parent parent) {
-            ObservableList<Node> children = parent.getChildrenUnmodifiable();
-            for (int i = children.size() - 1; i >= 0; i--) {
-                Node hit = pick(children.get(i), sceneX, sceneY);
+            List<Node> children = frontToBack(parent.getChildrenUnmodifiable());
+            for (Node child : children) {
+                Node hit = pick(child, sceneX, sceneY);
                 if (hit != null) {
                     return hit;
                 }
             }
         }
-        Point2D local = node.sceneToLocal(sceneX, sceneY);
-        return local != null && node.contains(local) ? node : null;
+        return node.contains(local) ? node : null;
+    }
+
+    /** Children in picking order: front first. Later siblings are in front of earlier ones,
+     * and a lower view order is in front of a higher one. */
+    private static List<Node> frontToBack(ObservableList<Node> children) {
+        List<Node> ordered = new ArrayList<>(children);
+        if (ordered.stream().anyMatch(n -> n.getViewOrder() != 0)) {
+            ordered.sort(Comparator.comparingDouble(Node::getViewOrder).reversed()); // back to front, stable
+        }
+        Collections.reverse(ordered);
+        return ordered;
     }
 }

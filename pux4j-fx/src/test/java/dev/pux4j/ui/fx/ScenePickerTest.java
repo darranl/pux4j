@@ -138,19 +138,62 @@ class ScenePickerTest {
         assertNull(ScenePicker.pick(root, 50, 50));
     }
 
-    /**
-     * Known, documented divergence from real JavaFX picking (see {@link ScenePicker}'s class
-     * javadoc): {@code Node.getClip()} is ignored. This test exists to make that a conscious,
-     * visible fact rather than a silent gap — if a future change makes clipping honoured, this
-     * assertion should flip to {@code assertNull}, not be deleted.
-     */
+    /** A clip excludes the clipped node's whole subtree outside the clip shape. */
     @Test
-    void pick_ignoresClip_childOutsideClippedRegionIsStillPickable() {
+    void pick_honoursClip_childOutsideClippedRegionIsNotPickable() {
         Rectangle child = rect(0, 0, 200, 200);
         Group clipped = new Group(child);
         clipped.setClip(new Rectangle(0, 0, 50, 50));
         Group root = new Group(clipped);
 
-        assertSame(child, ScenePicker.pick(root, 150, 150));
+        assertNull(ScenePicker.pick(root, 150, 150));
+        assertSame(child, ScenePicker.pick(root, 25, 25));
+    }
+
+    @Test
+    void pick_clipFallsThroughToNodeUnderneath() {
+        Rectangle under = rect(0, 0, 200, 200);
+        Rectangle clippedChild = rect(0, 0, 200, 200);
+        clippedChild.setClip(new Rectangle(0, 0, 50, 50));
+        Group root = new Group(under, clippedChild);
+
+        assertSame(under, ScenePicker.pick(root, 150, 150));
+    }
+
+    /** Lower view order is in front, regardless of child order. */
+    @Test
+    void pick_viewOrder_lowerValueIsInFront() {
+        Rectangle first = rect(0, 0, 100, 100);
+        Rectangle second = rect(0, 0, 100, 100);
+        first.setViewOrder(-1);
+        Group root = new Group(first, second);
+
+        assertSame(first, ScenePicker.pick(root, 50, 50));
+    }
+
+    @Test
+    void pick_viewOrder_equalValuesKeepLaterSiblingInFront() {
+        Rectangle a = rect(0, 0, 100, 100);
+        Rectangle b = rect(0, 0, 100, 100);
+        Rectangle c = rect(0, 0, 100, 100);
+        a.setViewOrder(5);
+        b.setViewOrder(5);
+        c.setViewOrder(9);
+        Group root = new Group(a, b, c);
+
+        assertSame(b, ScenePicker.pick(root, 50, 50));
+    }
+
+    /** A clip whose transform cannot be inverted is a miss, as in JavaFX, not an NPE. */
+    @Test
+    void pick_nonInvertibleClip_isAMiss_doesNotThrow() {
+        Rectangle child = rect(0, 0, 200, 200);
+        Rectangle clip = new Rectangle(0, 0, 50, 50);
+        clip.setScaleX(0);
+        Group clipped = new Group(child);
+        clipped.setClip(clip);
+        Group root = new Group(clipped);
+
+        assertNull(ScenePicker.pick(root, 25, 25));
     }
 }

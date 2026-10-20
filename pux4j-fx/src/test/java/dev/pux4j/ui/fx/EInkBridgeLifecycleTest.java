@@ -42,14 +42,15 @@ class EInkBridgeLifecycleTest {
         return EInkBridge.builder().display(display);
     }
 
-    /** A driver that reports one held contact on every poll and never blocks. */
+    /** A driver that alternates a press and a lift of one contact on every poll and never blocks. */
     private static final class AlwaysTouchedDriver implements TouchDriver {
         final AtomicInteger reads = new AtomicInteger();
         @Override public void initialize() {}
         @Override public void reset() {}
         @Override public List<TouchPoint> readTouches() {
-            reads.incrementAndGet();
-            return List.of(new TouchPoint(0, 10, 10, true));
+            // Alternates press and lift: a contact held still is (correctly) not dispatched again.
+            boolean down = reads.getAndIncrement() % 2 == 0;
+            return List.of(new TouchPoint(0, 10, 10, down));
         }
     }
 
