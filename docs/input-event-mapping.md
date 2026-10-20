@@ -87,7 +87,7 @@ remaining piece).
 | `MouseDragEvent` (full press-drag-release), drag-and-drop | Not emitted — **deviation** | Needs the internal `Scene` handler (D2). `DRAG_DETECTED` is still fired (apps use it for their own drag tracking), but a handler calling `startFullDrag()`/`startDragAndDrop()` fails (they need the scene's drag gesture). The bridge catches and logs that per event and carries on; such apps are not supported. |
 | `ScrollEvent` / `SwipeEvent` / `ZoomEvent` / `RotateEvent` (direct gestures) | Not emitted — **deviation** | On real JavaFX these come from the platform's gesture recogniser, not the scene; there is nothing in `Scene` to align with, so a recogniser would be a new design. Add when an app on a panel this size needs one. |
 | `ContextMenuEvent` (long press) | Not emitted — **deviation** (D3) | Also platform-generated; needs a hold timer, and a panel refresh takes ~0.5–1 s, so the user cannot see the menu appear in time to trust the gesture. |
-| `KeyEvent`, key focus traversal, text input | Out of scope | No keyboard. Focus follows `requestFocus()` calls made by controls on mouse press, which works. |
+| `KeyEvent`, key focus traversal, text input | Out of scope | No keyboard. Focus follows `requestFocus()` calls made by controls on mouse press: the press target becomes the scene's focus owner, but see the deviation below on `isFocused()`. |
 
 ### Contact model, `clickCount`, `stillSincePress`
 
@@ -192,6 +192,10 @@ Monocle `:hover` stays set after the lift (no pointer-leave is sent); the bridge
 | `stillSincePress` is `true` on the press itself | JavaFX reports the previous gesture's value there (see above). |
 | Controls behave as on a desktop | `ScrollPane` etc. consume `TOUCH_*` and switch on the platform's `IS_TOUCH_SUPPORTED`, which is false for this bridge. Whatever events arrive, those controls follow the desktop path. |
 | Mouse synthesis model | Modelled on Monocle; desktop glass ports may order or synthesize differently. |
+| Re-entering at the press | After the exit that follows a lift, a repeat press at the same spot enters the hierarchy from the press itself (enter events carry its button state and click count) with no `MOUSE_MOVED` first. Follows from the exit-after-lift rule. |
+| `MOUSE_EXITED`/`MOUSE_EXITED_TARGET` after a lift carry the release's `clickCount` | They are derived from the release event; JavaFX gives enter/exit events a click count of 0. |
+| A control never reports `isFocused()` | `Node.isFocused()` needs a focused window and the scene has none. The press target is the scene's focus owner (`scene.getFocusOwner()`), but there is no `:focused` style and a `TextField` shows no caret. |
+| Controls that open a popup are not supported | `ComboBox`, `ChoiceBox`, `MenuButton`, `ContextMenu`, `Tooltip` and dialogs need an owner window; tapping one throws `NullPointerException: Owner window must not be null` out of the control's own handler (outside the synthesizer's per-event catch). Not designed yet; apps on the panel should avoid them. |
 
 ## Decisions
 
@@ -203,7 +207,7 @@ Monocle `:hover` stays set after the lift (no pointer-leave is sent); the bridge
   at build, run and native-image time, version-fragile) in a public library that uses only public
   API, and it cannot cover touch (`processTouchEvent` is private). **Use it in tests only**, as an
   oracle: feed the same contact sequence to a real `Scene` via `SceneHelper.processMouseEvent` and
-  compare event traces with the bridge's (surefire `--add-exports`).
+  compare event traces with the bridge's (`--add-exports` at test compile time only).
 - **D3 — long press:** deferred, documented deviation.
 
 ## Testing
@@ -212,17 +216,33 @@ Tests that need no toolkit run in the `pux4j-fx` unit tests: contact tracking, i
 diffing, inferred lifts, primary selection, dead-band and click counting against a supplied
 clock, and the mouse synthesis itself against a detached node tree with a stub in place of the
 `Scene` (event order, `_TARGET` chains, `:pressed`/`:hover`, click target, `DRAG_DETECTED`,
-removal, re-parenting, throwing handlers, empty-space fallback to the top target). Tests that
-need a real `Scene` or controls (`Button` arming and `onAction`, the `Scene` itself as the
-target) and the oracle run in the bridge-smoke module, which already needs a display.
-The oracle can only compare **mouse** events (`Scene.processTouchEvent` is private) and must avoid
-timing-dependent fields (`clickCount` derives from a `Timeline`). The test classpath is the plain
-classpath, so `SceneHelper` is reachable without extra `--add-exports`; if tests move to the module
-path, export `com.sun.javafx.scene` to the test module. Coverage:
+removal, re-parenting, throwing handlers, empty-space fallback to the top target).
+
+Tests that need a real `Scene` and controls run in the bridge-smoke module, which needs a display
+for the JavaFX toolkit (they are skipped without one; `-Dpux4j.fxTests.required=true` makes that a
+failure). They go through the public API only: a real `EInkBridge` hosting a stage-less `Scene`
+(as in production), fed by a scripted touch driver that enqueues a whole gesture atomically (the
+touch thread reads one batch per poll and reads an empty poll as a lift), so the whole path
+touch driver → contact model → mouse synthesis → scene is exercised. Tap positions are taken
+from node bounds after `applyCss()`/`layout()`; without that, skins and so control behaviour
+do not exist yet.
+
+The oracle can only compare **mouse** events (`Scene.processMouseEvent` is reachable, but
+`Scene.processTouchEvent` is private). Two identical scenes are traced by the same scene filter:
+one hosted by the bridge, one fed directly through `SceneHelper.processMouseEvent`. The oracle's
+expected trace is rewritten for the documented deviations above (no re-pick, re-entering at the
+press, the exit click count) and then compared exactly, including target path, scene position,
+button state and `clickCount`; `stillSincePress` is not compared because the toolkit's
+multi-click distance and time come from the desktop (400 ms / 5 px under GTK) while the bridge uses
+Monocle's 500 ms / 20 px. Its `Timeline`-based multi-click timeout never fires inside one FX turn,
+so the double tap compares counts only because both sides count up. The oracle needs
+`--add-exports javafx.graphics/com.sun.javafx.scene=<test module>` in the compiler's test-compile
+arguments (the test sources are compiled in module mode); surefire runs the tests on the plain
+classpath, so nothing is needed at run time. Coverage:
 
 - Event order per tap; `_TARGET` chains outermost-first; no plain `MOUSE_ENTERED` fired by the bridge.
 - `:pressed` on target and ancestors, `:hover` during touch and cleared after.
-- A real `Button` fires `onAction`; its `:pressed`/armed state follows the contact.
+- A real `Button` fires `onAction`. `:hover` and armed follow the contact; `:pressed` stays on the press target until the release, wherever the contact goes.
 - Click at the common ancestor when press and release land on different nodes; no distance cutoff;
   `clickCount` for a double tap; `stillSincePress` false after a drag.
 - `DRAG_DETECTED` once per gesture.
