@@ -196,7 +196,7 @@ Monocle `:hover` stays set after the lift (no pointer-leave is sent); the bridge
 | A throwing handler does not abort the rest of the poll | `Scene` lets the exception escape its mouse and touch processing, which would skip e.g. `MOUSE_CLICKED`, the remaining touch points and the grab processing, and leave gesture state stale. Touch and mouse synthesis are also independent: a failure on the touch side does not stop the mouse side. The bridge passes the exception to the FX thread's uncaught-exception handler (where applications expect handler exceptions to end up) and carries on. |
 | Screen coordinates equal scene coordinates | The bridge has no stage or window. |
 | `stillSincePress` is `true` on the press itself | JavaFX reports the previous gesture's value there (see above). |
-| Controls behave as on a desktop | Some controls switch on the platform's `IS_TOUCH_SUPPORTED`, which is false for this bridge, and follow their desktop path. Others react to `TOUCH_*` events themselves regardless: the `ScrollPane` skin handles touch pressed/released, and the `Pagination` skin turns a touch swipe into a page change. They now see the touch stream as well as the mouse one. |
+| Controls behave as on a desktop | Some controls switch on the platform's `IS_TOUCH_SUPPORTED`, which is false for this bridge, and follow their desktop path. Others react to `TOUCH_*` events themselves regardless: the `ScrollPane` skin handles touch pressed/released (it only notes that a touch happened and drives its scroll-bar fade; panning itself is mouse-drag based and needs `pannable`), and the `Pagination` skin turns a touch swipe into a page change. They now see the touch stream as well as the mouse one. |
 | A press ignores a stale grab; an unknown touch-point id is treated as ungrabbed; a set with id 1 discards leftover grabs | `Scene` honours the stored grab even for a press and throws `Platform reported wrong touch point ID` for an unknown id, because it trusts the platform to report every release. The bridge can miss a release (a lost dispatch, a failed poll) and its public-API path cannot reproduce the toolkit's id validation, so it recovers instead of throwing or sending a new gesture to a node from an old one. |
 | Mouse synthesis model | Modelled on Monocle; desktop glass ports may order or synthesize differently. |
 | Re-entering at the press | After the exit that follows a lift, a repeat press at the same spot enters the hierarchy from the press itself (enter events carry its button state and click count) with no `MOUSE_MOVED` first. Follows from the exit-after-lift rule. |
@@ -236,20 +236,39 @@ touch driver → contact model → mouse synthesis → scene is exercised. Tap p
 from node bounds after `applyCss()`/`layout()`; without that, skins and so control behaviour
 do not exist yet.
 
-The oracle can only compare **mouse** events (`Scene.processMouseEvent` is reachable, but
-`Scene.processTouchEvent` is private). Two identical scenes are traced by the same scene filter:
-one hosted by the bridge, one fed directly through `SceneHelper.processMouseEvent`. The oracle's
-expected trace is rewritten for the documented deviations above (no re-pick, re-entering at the
-press, the exit click count) and then compared exactly, including target path, scene position,
-button state and `clickCount`; `stillSincePress` is not compared because the toolkit's
-multi-click distance and time come from the desktop (400 ms / 5 px under GTK) while the bridge uses
-Monocle's 500 ms / 20 px. Its `Timeline`-based multi-click timeout never fires inside one FX turn,
-so the double tap compares counts only because both sides count up. The oracle needs
+There are two oracles, both comparing a scene hosted by the bridge with a second, identical scene
+fed directly, each traced by the same scene filter.
+
+The **mouse** oracle feeds the second scene through `SceneHelper.processMouseEvent`. Its expected
+trace is rewritten for the documented deviations above (no re-pick, re-entering at the press, the
+exit click count) and then compared exactly, including target path, scene position, button state
+and `clickCount`; `stillSincePress` is not compared because the toolkit's multi-click distance and
+time come from the desktop (400 ms / 5 px under GTK) while the bridge uses Monocle's 500 ms / 20 px.
+Its `Timeline`-based multi-click timeout never fires inside one FX turn, so the double tap compares
+counts only because both sides count up. It needs
 `--add-exports javafx.graphics/com.sun.javafx.scene=<test module>` in the compiler's test-compile
 arguments (the test sources are compiled in module mode); surefire runs the tests on the plain
-classpath, so nothing is needed at run time. Coverage (the touch-event items — multi-contact sets,
-grab/ungrab, `TOUCH_STATIONARY`, touch over nothing, a node handling both streams — are planned for
-this module; today they are covered by the unit tests only):
+classpath, so nothing is needed at run time.
+
+The **touch** oracle needs no export. `Scene.processTouchEvent` is private, but a stage-less
+`Scene` can be given a `Scene$ScenePeerListener` by reflection (the tests run on the classpath, so
+access is allowed), and feeding it `touchEventBegin/Next/End` runs JavaFX's own touch path. Each
+case is written once as touch sets with raw driver ids; the bridge gets the same sets as driver
+frames. The traces (event type, target, point id and state, touch count, set id, grab, scene
+position, the pick result's node) are compared exactly, with handlers installed on both scenes:
+tap, empty space, a drag off the node, two fingers, ungrab on press, `grab()` on an ungrabbed
+point, a parent's `grab()`, a cross-point grab, consumed events. Moves stay clear of the contact
+model's dead-band, which the listener has no counterpart for. The runtime is the build's JavaFX
+(23.0.1); `processTouchEvent` and `touchEventBegin/Next/End` are unchanged in 27.
+
+Beyond the oracles the module covers: a held contact reported `STATIONARY` beside a moving one, a
+removed grab target that keeps receiving, a node handling both streams (touch first, mouse
+synthesized), a touch handler that throws a `RuntimeException` or an `Error` without losing the
+mouse stream, and two stock controls that read touch themselves. `ScrollPane` pans on
+`MOUSE_DRAGGED` when it is pannable (the skin only does so unconditionally where the platform
+reports touch support, which this bridge does not), so a drag scrolls a pannable pane and leaves
+a plain one alone; `Pagination` turns pages on a swipe. Coverage across the unit tests and this
+module:
 
 - Event order per tap; `_TARGET` chains outermost-first; no plain `MOUSE_ENTERED` fired by the bridge.
 - `:pressed` on target and ancestors, `:hover` during touch and cleared after.

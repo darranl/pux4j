@@ -15,6 +15,7 @@ import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.Scene;
 import javafx.scene.input.MouseEvent;
+import javafx.scene.input.TouchEvent;
 import org.junit.jupiter.api.Assumptions;
 
 import java.nio.file.Path;
@@ -36,7 +37,8 @@ import static dev.pux4j.ui.bridgesmoke.BridgeCheckHarness.runAndWaitOnFx;
  * production — plus a {@link Trace} of every mouse event the scene sees.
  *
  * <p>The tests drive the whole pipeline: touch driver → touch thread → {@code ContactSet} → FX
- * thread → {@code MouseSynthesizer} → the scene. Nothing in {@code pux4j-fx} is reached around.
+ * thread → {@code TouchSynthesizer} and {@code MouseSynthesizer} → the scene. Nothing in
+ * {@code pux4j-fx} is reached around. A {@link TouchTrace} records the touch events the scene sees.
  *
  * <p>Needs a display for the JavaFX toolkit: without one the tests are skipped, unless the system
  * property {@code pux4j.fxTests.required} is {@code true} (then they fail).
@@ -77,6 +79,7 @@ final class BridgeFixture implements AutoCloseable {
 
     final Scene scene;
     final Trace trace = new Trace();
+    final TouchTrace touchTrace = new TouchTrace();
     private final EInkBridge bridge;
     private final ScriptedTouch touch;
 
@@ -121,6 +124,7 @@ final class BridgeFixture implements AutoCloseable {
         BridgeFixture fixture = new BridgeFixture(scene, bridge, touch);
         runAndWaitOnFx(() -> {
             fixture.trace.install(scene);
+            fixture.touchTrace.install(scene);
             bridge.start(scene);
         });
         return fixture;
@@ -128,13 +132,24 @@ final class BridgeFixture implements AutoCloseable {
 
     /** Plays {@code gesture} through the touch driver and returns once the scene has seen all of it. */
     void play(Gesture gesture) throws Exception {
-        touch.submit(gesture.batches());
+        playFrames(gesture.batches());
+    }
+
+    /** Plays raw touch-driver frames (one list of contacts per poll) — for several fingers at once. */
+    void playFrames(List<List<TouchPoint>> frames) throws Exception {
+        touch.submit(frames);
         if (!awaitCondition(touch::settled, BridgeCheckHarness.CONDITION_TIMEOUT_MS)) {
-            throw new AssertionError("touch thread did not consume the gesture within "
+            throw new AssertionError("touch thread did not consume the frames within "
                     + BridgeCheckHarness.CONDITION_TIMEOUT_MS + "ms");
         }
         runAndWaitOnFx(() -> { });
     }
+
+    /** A contact for {@link #playFrames}: down at (x, y). */
+    static TouchPoint down(int id, int x, int y) { return new TouchPoint(id, x, y, true); }
+
+    /** A contact for {@link #playFrames}: lifted at (x, y). */
+    static TouchPoint up(int id, int x, int y) { return new TouchPoint(id, x, y, false); }
 
     /** Centre of {@code node} in scene coordinates, taken after layout. */
     int[] centre(Node node) throws Exception {
@@ -272,6 +287,45 @@ final class BridgeFixture implements AutoCloseable {
         List<String> typesAt(String target) {
             return entries.stream().filter(e -> e.target().equals(target)).map(Entry::type)
                     .filter(t -> !t.endsWith("_TARGET")).toList();
+        }
+
+        void clear() { entries.clear(); }
+    }
+
+    /** Every {@link TouchEvent} the scene sees, with the state of its point when the event arrived. */
+    static final class TouchTrace {
+        record Entry(String type, String target, int pointId, String state, int touchCount, int setId,
+                     String grabbed, long sceneX, long sceneY, String picked) {
+            @Override public String toString() {
+                return type + " @" + target + " id=" + pointId + " " + state + " n=" + touchCount
+                        + " set=" + setId + " grab=" + grabbed + " (" + sceneX + "," + sceneY + ")"
+                        + " picked=" + picked;
+            }
+        }
+
+        private final List<Entry> entries = new CopyOnWriteArrayList<>();
+
+        void install(Scene scene) {
+            scene.addEventFilter(TouchEvent.ANY, e -> {
+                javafx.scene.input.TouchPoint tp = e.getTouchPoint();
+                entries.add(new Entry(
+                        e.getEventType().getName(), pathOf(scene, e.getTarget()), tp.getId(),
+                        tp.getState().name(), e.getTouchCount(), e.getEventSetId(),
+                        tp.getGrabbed() == null ? null : pathOf(scene, tp.getGrabbed()),
+                        Math.round(tp.getSceneX()), Math.round(tp.getSceneY()),
+                        pathOf(scene, tp.getPickResult().getIntersectedNode())));
+            });
+        }
+
+        List<Entry> all() { return List.copyOf(entries); }
+
+        List<Entry> forPoint(int id) {
+            return entries.stream().filter(e -> e.pointId() == id).toList();
+        }
+
+        /** Event types without the {@code TOUCH_} prefix, in order. */
+        List<String> types() {
+            return entries.stream().map(e -> e.type().replace("TOUCH_", "")).toList();
         }
 
         void clear() { entries.clear(); }
