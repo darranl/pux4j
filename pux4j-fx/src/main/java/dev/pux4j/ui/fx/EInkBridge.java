@@ -277,6 +277,12 @@ public final class EInkBridge {
      */
     private MouseSynthesizer mouseSynthesizer;
 
+    /**
+     * Touch events from the touch set in each {@link ContactSet.PollResult}. Created and used
+     * exactly like {@link #mouseSynthesizer}.
+     */
+    private TouchSynthesizer touchSynthesizer;
+
     private volatile Scene scene;
     private volatile Thread displayThread;
     private volatile Thread touchThread;
@@ -787,6 +793,7 @@ public final class EInkBridge {
         this.scene = scene;
         contactSet.clear();
         mouseSynthesizer = new MouseSynthesizer(scene);
+        touchSynthesizer = new TouchSynthesizer(scene);
         hasCaptured = false;
 
         displayThread = Thread.ofVirtual().name("eink-display").start(this::runDisplayLoop);
@@ -1344,16 +1351,36 @@ public final class EInkBridge {
     }
 
     /**
-     * Synthesizes the mouse events for one poll's pointer via {@link #mouseSynthesizer}. Always
-     * runs on the FX thread (only ever invoked via {@code Platform.runLater()} from
-     * {@link #runTouchLoop}), so the synthesizer needs no synchronization.
+     * Synthesizes the touch events for one poll's touch set via {@link #touchSynthesizer}, then
+     * the mouse events for its pointer via {@link #mouseSynthesizer} (the touch set is posted
+     * first, as Monocle does). The mouse stream runs even if the touch side fails, so a gesture's
+     * release is never lost to a touch-side error. Always runs on the FX thread (only ever
+     * invoked via {@code Platform.runLater()} from {@link #runTouchLoop}), so the synthesizers
+     * need no synchronization.
      */
     private void injectTouches(ContactSet.PollResult result) {
         Scene currentScene = scene;
         if (currentScene == null) {
             return; // stopped between the poll and this runLater turn running
         }
-        mouseSynthesizer.process(result.pointer(), (x, y) -> ScenePicker.pick(currentScene, x, y));
+        Picker picker = (x, y) -> ScenePicker.pick(currentScene, x, y);
+        Throwable touchFailure = null;
+        try {
+            touchSynthesizer.process(result, picker);
+        } catch (RuntimeException | Error e) {
+            touchFailure = e;
+            throw e;
+        } finally {
+            try {
+                mouseSynthesizer.process(result.pointer(), picker);
+            } catch (RuntimeException | Error e) {
+                if (touchFailure != null) {
+                    // The mouse failure propagates instead, so this one would otherwise be lost.
+                    LOG.error("Touch synthesis failed (superseded by a mouse synthesis failure)", touchFailure);
+                }
+                throw e;
+            }
+        }
     }
 
     /**

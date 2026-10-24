@@ -34,12 +34,6 @@ final class MouseSynthesizer {
 
     private static final Logger LOG = LoggerFactory.getLogger(MouseSynthesizer.class);
 
-    /** Finds the node under a scene-coordinate point, or {@code null} if there is none. */
-    @FunctionalInterface
-    interface Picker {
-        Node pick(double x, double y);
-    }
-
     private final EventTarget top;
     private final Consumer<Throwable> handlerFailure;
 
