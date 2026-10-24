@@ -5,8 +5,8 @@
 #   ./run-emulator.sh [<app>] [-D<pux4j property>=<value> ...]
 #   ./run-emulator.sh --list
 #
-# The only app today is "demo" (the counter); <app> is optional while it is the only
-# SceneContent on the module path. Display size/panel: -Dpux4j.display.* (see EInkBridge).
+# Apps: "demo" (the counter) and "dice-demo"; <app> is required while more than one
+# SceneContent is on the module path (--list shows them). Display size/panel: -Dpux4j.display.* (see EInkBridge).
 #
 # Environment:
 #   SKIP_PREPARE=1    Skip auto-build/dependency preparation checks

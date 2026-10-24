@@ -59,6 +59,11 @@
                     <artifactId>pux4j-demo</artifactId>
                     <version>${project.version}</version>
                 </dependency>
+                <dependency>
+                    <groupId>dev.pux4j.ui</groupId>
+                    <artifactId>pux4j-dice-demo</artifactId>
+                    <version>${project.version}</version>
+                </dependency>
             </dependencies>
         </profile>
         <!-- Hardware bundle for LittleRaspberry: launcher + the demo apps + the 2.13" V4 HAT drivers
@@ -75,6 +80,11 @@
                 <dependency>
                     <groupId>dev.pux4j.ui</groupId>
                     <artifactId>pux4j-demo</artifactId>
+                    <version>${project.version}</version>
+                </dependency>
+                <dependency>
+                    <groupId>dev.pux4j.ui</groupId>
+                    <artifactId>pux4j-dice-demo</artifactId>
                     <version>${project.version}</version>
                 </dependency>
             </dependencies>

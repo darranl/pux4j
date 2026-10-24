@@ -38,7 +38,7 @@ Upside-down, mirrored, or `+`/`−` swapped means an orientation bug.
 The headless run proves the logic; this checks a real window with mouse input.
 
 ```bash
-./pux4j-launcher/run-emulator.sh -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4
+./pux4j-launcher/run-emulator.sh demo -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4
 ```
 
 Omit the `-Dpux4j.emulator.display` property for the 2.9" profile. A panel-shaped window opens and
@@ -72,7 +72,8 @@ Put `<dir>/lib` and `pux4j-launcher-*.jar` (into the same `lib/`) on the Pi, wit
 
 ```bash
 pux4j --list        # the apps in the bundle
-pux4j demo          # run the counter demo (the name is optional while there is only one app)
+pux4j demo          # run the counter demo (the app name is required: the bundle has more than one)
+pux4j dice-demo     # run the dice demo
 ```
 
 Other `pux4j.*` properties go on the same line as `-D` options, e.g.
