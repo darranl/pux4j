@@ -6,6 +6,7 @@ import dev.pux4j.ui.core.RefreshMode;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Button;
+import javafx.scene.input.MouseEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -14,6 +15,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static dev.pux4j.ui.bridgesmoke.BridgeCheckHarness.*;
 
@@ -49,6 +51,18 @@ public final class DiceBridgeCheck {
         Button roll = lookup(scene, "#rollBtn", Button.class);
         List<Node> dice = new ArrayList<>(callAndWaitOnFx(() -> scene.getRoot().lookupAll(".die-view")));
         checkEquals(5, dice.size(), "number of dice");
+
+        // Counts MOUSE_CLICKED events whose target is inside a die. The app's own handler is
+        // untouched; the filter only observes, so a pass means the bridge delivered the click.
+        AtomicInteger dieClicks = new AtomicInteger();
+        runAndWaitOnFx(() -> scene.addEventFilter(MouseEvent.MOUSE_CLICKED, e -> {
+            for (Object t = e.getTarget(); t instanceof Node n; t = n.getParent()) {
+                if (n.getStyleClass().contains("die-view")) {
+                    dieClicks.incrementAndGet();
+                    return;
+                }
+            }
+        }));
 
         // --- Frame 1: initial layout ---------------------------------------------------
         check(recording.awaitWriteCount(c -> c >= 1, CONDITION_TIMEOUT_MS),
@@ -89,8 +103,11 @@ public final class DiceBridgeCheck {
         // --- Tapping a die before the first roll does nothing --------------------------------
         int writes = recording.writeCount();
         tap(touch, 1, dieRects.get(0));
+        check(awaitCondition(() -> dieClicks.get() >= 1, CONDITION_TIMEOUT_MS),
+                "the tap on a die never produced a MOUSE_CLICKED");
         Thread.sleep(NO_WRITE_TIMEOUT_MS);
         checkEquals(writes, recording.writeCount(), "tapping a die before the first roll must not redraw");
+        checkEquals(1, dieClicks.get(), "a tap on a die must deliver exactly one MOUSE_CLICKED to it");
 
         // --- Roll 1 ----------------------------------------------------------------------------
         tap(touch, 2, rollR);
@@ -102,6 +119,7 @@ public final class DiceBridgeCheck {
         // --- Save a die, then un-save it -----------------------------------------------------------
         tap(touch, 3, dieRects.get(0));
         BufferedImage saved = awaitFrameChange(session, rolled1, "tapping a die did not save it (no redraw)");
+        checkEquals(2, dieClicks.get(), "the tap that saved a die must deliver one MOUSE_CLICKED");
         tap(touch, 4, dieRects.get(0));
         BufferedImage unsaved = awaitFrameChange(session, saved, "tapping a saved die did not un-save it");
         check(sameImage(rolled1, unsaved), "un-saving the die did not restore the pre-save frame");
@@ -118,6 +136,8 @@ public final class DiceBridgeCheck {
         // After the final roll every die shows as saved and taps are ignored.
         writes = recording.writeCount();
         tap(touch, 7, dieRects.get(1));
+        check(awaitCondition(() -> dieClicks.get() >= 4, CONDITION_TIMEOUT_MS),
+                "the tap on a die after the third roll never produced a MOUSE_CLICKED");
         Thread.sleep(NO_WRITE_TIMEOUT_MS);
         checkEquals(writes, recording.writeCount(), "tapping a die after the third roll must not redraw");
 

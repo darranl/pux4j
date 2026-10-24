@@ -5,6 +5,7 @@ import dev.pux4j.ui.bridgesmoke.BridgeFixture.Gesture;
 import javafx.scene.Node;
 import javafx.scene.control.Button;
 import javafx.scene.control.CheckBox;
+import javafx.scene.control.ComboBox;
 import javafx.scene.control.ScrollPane;
 import javafx.scene.control.Slider;
 import javafx.scene.input.MouseEvent;
@@ -22,6 +23,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static dev.pux4j.ui.bridgesmoke.BridgeCheckHarness.callAndWaitOnFx;
+import static dev.pux4j.ui.bridgesmoke.BridgeCheckHarness.runAndWaitOnFx;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,6 +54,37 @@ class StandardControlsBridgeTest {
             f.play(Gesture.press(t[0], t[1]).dragTo(t[0] + 100, t[1]).release());
             double value = callAndWaitOnFx(slider[0]::getValue);
             assertTrue(value > 30, "slider value after a 100 px drag: " + value);
+        }
+    }
+
+    /**
+     * Pins the documented gap (docs/input-event-mapping.md, "Controls that open a popup are not
+     * supported"): a popup needs an owner window and the bridge's scene has none. If a JavaFX
+     * upgrade or a bridge change makes this pass without an exception, update the doc row.
+     */
+    @Test
+    void comboBoxPopupFailsForWantOfAnOwnerWindow() throws Exception {
+        ComboBox<String>[] combo = new ComboBox[1];
+        try (BridgeFixture f = BridgeFixture.open(out, () -> {
+            combo[0] = new ComboBox<>();
+            combo[0].getItems().addAll("one", "two");
+            combo[0].setPrefSize(120, 30);
+            combo[0].relocate(20, 20);
+            return new Pane(combo[0]);
+        })) {
+            List<Throwable> uncaught = new CopyOnWriteArrayList<>();
+            runAndWaitOnFx(() -> Thread.currentThread().setUncaughtExceptionHandler((t, ex) -> uncaught.add(ex)));
+            try {
+                int[] c = f.centre(combo[0]);
+                f.play(Gesture.tap(c[0], c[1]));
+            } finally {
+                runAndWaitOnFx(() -> Thread.currentThread().setUncaughtExceptionHandler(null));
+            }
+            assertTrue(uncaught.stream().anyMatch(e -> e instanceof NullPointerException
+                            && String.valueOf(e.getMessage()).contains("Owner window")),
+                    uncaught.toString());
+            // The control sets its showing state before the popup throws, so it stays "showing".
+            assertTrue(callAndWaitOnFx(combo[0]::isShowing), "showing state after the failed popup");
         }
     }
 
