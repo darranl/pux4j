@@ -97,6 +97,14 @@ public final class DiceBridgeCheck {
                     "button " + r + " does not fit inside the " + w + "x" + h + " scene");
         }
         checkEquals("Roll 1", callAndWaitOnFx(roll::getText), "initial Roll button text");
+        // Both buttons must pick up the dice CSS: FXML splits styleClass on commas, so a
+        // space-separated list silently leaves a button on plain Modena styling.
+        check(callAndWaitOnFx(() -> clear.getStyleClass().contains("action-button")),
+                "Clear must carry the action-button style class, got "
+                        + callAndWaitOnFx(() -> List.copyOf(clear.getStyleClass())));
+        check(callAndWaitOnFx(() -> roll.getStyleClass().contains("action-button")),
+                "Roll must carry the action-button style class, got "
+                        + callAndWaitOnFx(() -> List.copyOf(roll.getStyleClass())));
         check(callAndWaitOnFx(clear::isDisabled), "Clear must start disabled");
         BufferedImage cleared = latestFrame(session);
 

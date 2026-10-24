@@ -13,7 +13,7 @@
         <HBox prefHeight="32" styleClass="button-row">
             <Button fx:id="clearBtn" text="Clear"
                     HBox.hgrow="ALWAYS" maxWidth="Infinity"
-                    styleClass="action-button action-button-left" onAction="#onClear"/>
+                    styleClass="action-button, action-button-left" onAction="#onClear"/>
             <Button fx:id="rollBtn" text="Roll 1"
                     HBox.hgrow="ALWAYS" maxWidth="Infinity"
                     styleClass="action-button" onAction="#onRoll"/>

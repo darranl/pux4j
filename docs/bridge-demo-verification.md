@@ -27,9 +27,9 @@ rendered frame); and that "−" is disabled at 0. Frames are written to
 
 | Frame | Shows |
 |---|---|
-| `frame-0001.png` | Large black `0` in the middle and a black-bordered `+` box on the **right**. The `−` box on the left is **invisible**: it is disabled, and its grey border is thresholded to white on a monochrome panel (a known limitation of the current disabled style). |
-| `frame-0002.png` | `1` in the middle; the `−` box is now visible on the left. |
-| `frame-0003.png` | Back to `0`; `−` invisible again. |
+| `frame-0001.png` | Large black `0` in the middle and a black-bordered `+` box on the **right**. The `−` box on the left is **inverted**: it is disabled, and the bridge draws a disabled control as a black box with a white `−`. |
+| `frame-0002.png` | `1` in the middle; the `−` box is now enabled (white, black border) on the left. |
+| `frame-0003.png` | Back to `0`; `−` inverted (black box) again. |
 
 Upside-down, mirrored, or `+`/`−` swapped means an orientation bug.
 
@@ -44,8 +44,8 @@ The headless run proves the logic; this checks a real window with mouse input.
 Omit the `-Dpux4j.emulator.display` property for the 2.9" profile. A panel-shaped window opens and
 the mouse acts as the finger. Check:
 
-1. The window shows `0` and a `+` box on the right; `−` is invisible or faint grey.
-2. Click `+`: the number becomes `1` and `−` appears. Keep clicking up to `10`; `+` is then disabled.
+1. The window shows `0` and a `+` box on the right; `−` is a black box with a white `−`.
+2. Click `+`: the number becomes `1` and `−` un-inverts. Keep clicking up to `10`; `+` is then disabled.
 3. Click `−` back down to `0`.
 4. Click the number in the middle: nothing changes.
 5. The layout fills the window edge to edge, with no clipped number and no overlapping boxes.
@@ -84,8 +84,8 @@ written to `~/tmp/run-log.txt`.
 ### What to expect
 
 - **Start-up:** one visible full-panel flash (FULL refresh), then the static frame from the table
-  above. Monochrome, no greys; the `−` box is invisible.
-- **Tapping `+`:** a PARTIAL refresh (no full flash) that updates the number and reveals `−`.
+  above. Monochrome, no greys; the `−` box is a black box with a white `−`.
+- **Tapping `+`:** a PARTIAL refresh (no full flash) that updates the number and un-inverts `−`.
   Roughly a second of latency or less is normal for e-paper.
 - **Handedness:** touching the **right** box must be the one that increments. Swapped left/right or
   up/down means the touch mapping or orientation is wrong (the 2.13" panel is mounted

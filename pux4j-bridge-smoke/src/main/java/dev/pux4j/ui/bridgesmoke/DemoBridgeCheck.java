@@ -72,10 +72,11 @@ public final class DemoBridgeCheck {
         check(incBorderGray < 60, "the \"+\" button's left border pixel (" + (incR.x() + 1) + ","
                 + incR.cy() + ") should be black, was gray=" + incBorderGray
                 + " — frame orientation or layout is wrong; see frame-0001.png");
-        // The disabled button's #909090 border is deliberately NOT asserted: on a
-        // monochrome panel THRESHOLD turns it white (the disabled look is not settled yet).
-        LOG.info("Disabled \"−\" border pixel gray={} (not asserted; the disabled look is not settled)",
-                grayAt(frame1, decR.x() + 1, decR.cy()));
+        // The disabled button is colour-inverted by the bridge: dark inside its layout box. Sample a
+        // few pixels in from the edge of the visual bounds (they include the control's outset).
+        int decGray = grayAt(frame1, decR.x() + 8, decR.cy());
+        check(decGray < 60, "the disabled \"−\" button should be inverted (dark) at (" + (decR.x() + 8) + ","
+                + decR.cy() + "), was gray=" + decGray + "; see frame-0001.png");
 
         // --- Tap "+" -------------------------------------------------------------------
         tap(touchSource, 1, incR);

@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.foreign.MemorySegment;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -207,6 +208,13 @@ public final class EInkBridge {
      * {@link #recordCaptureSkipped}. Escalates from DEBUG to a one-time WARN so a leaked/never-
      * returned buffer (finding C4) is distinguishable from ordinary brief saturation. */
     private final AtomicInteger consecutiveBufferStarvations = new AtomicInteger();
+
+    /**
+     * Invert the colours of disabled controls in the captured frame (see {@link DisabledInverter});
+     * {@code -Dpux4j.disabled.invert=false} turns it off. Read once, at class load.
+     */
+    private static final boolean INVERT_DISABLED =
+            !"false".equalsIgnoreCase(System.getProperty("pux4j.disabled.invert"));
 
     private static final int BUFFER_STARVATION_WARN_THRESHOLD = 10;
 
@@ -419,7 +427,9 @@ public final class EInkBridge {
      * {@code pux4j.refresh.maxPartials}, {@code pux4j.refresh.maxRegions},
      * {@code pux4j.refresh.fullRefreshThreshold}, {@code pux4j.transform.strategy},
      * {@code pux4j.transform.pixelFormat} (or {@code auto} for
-     * {@link DisplayCapabilities#preferredFormat()}).
+     * {@link DisplayCapabilities#preferredFormat()}), {@code pux4j.disabled.invert} ({@code false}
+     * turns off the inverted look of disabled controls, see {@link DisabledInverter}; read once at
+     * class load, not by this method).
      *
      * <p>Orientation: every real driver reads a plain {@code "orientation"} string property
      * from {@link DriverConfig} at construction time (there is no post-construction setter),
@@ -1565,6 +1575,12 @@ public final class EInkBridge {
                     0, 0, orientationMapping.logicalWidth(), orientationMapping.logicalHeight(),
                     javafx.scene.image.PixelFormat.getByteBgraInstance(),
                     buffer.pixels(), 0, orientationMapping.logicalWidth() * 4);
+            if (INVERT_DISABLED) {
+                List<DisabledInverter.Rect> disabled = new ArrayList<>();
+                DisabledInverter.collect(currentScene.getRoot(), orientationMapping.logicalWidth(),
+                        orientationMapping.logicalHeight(), disabled);
+                DisabledInverter.invert(buffer.pixels(), orientationMapping.logicalWidth(), disabled);
+            }
             offerReplacing(new RenderWork(buffer.segment(), buffer, nextCaptureSeq++));
             submitted = true;
             if (pendingAtCaptureStart) {

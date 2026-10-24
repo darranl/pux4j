@@ -45,8 +45,11 @@
     -fx-background-color: #d0d0d0;
 }
 
+/* The bridge inverts disabled controls in the captured frame (white on black). Modena dims
+   :disabled with -fx-opacity: 0.4, which would be inverted into text that thresholds away on
+   a monochrome panel; reset it. */
 .action-button:disabled {
-    -fx-opacity: 0.25;
+    -fx-opacity: 1;
 }
 
 .die-view {
