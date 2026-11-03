@@ -28,10 +28,12 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.HexFormat;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.zip.CRC32;
 
 final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
 
@@ -133,7 +135,7 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     };
 
     // 4-gray LUT — 159 bytes; [153..158] are EOPT,VGH,VSH1,VSH2,VSL,VCOM
-    private static final byte[] GRAY4_LUT = {
+    static final byte[] GRAY4_LUT = {
         0x00, 0x60, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x20, 0x60, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x28, 0x60, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -178,6 +180,9 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     }
 
     private final Orientation   orientation;
+
+    /** The 4-gray waveform actually sent: the vendor LUT in the order chosen by configuration. */
+    private final byte[]        gray4Lut;
     private final Spi           spi;
     private final DigitalOutput dc;
     private final DigitalOutput rst;
@@ -201,6 +206,13 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         Context ctx = context.pi4j();
 
         orientation = Orientation.valueOf(config.property("orientation", "PORTRAIT"));
+
+        // SPLIT_FLASH is the default: the vendor order shows the old and new images overlaid
+        // during a refresh. The -D form is read here because the bridge only forwards the orientation to drivers.
+        FourGrayLut.Variant lutVariant = FourGrayLut.parse(config.property("fourGrayLut",
+            System.getProperty("pux4j.display.fourGrayLut", "SPLIT_FLASH")));
+        gray4Lut = FourGrayLut.build(GRAY4_LUT, lutVariant);
+        log.info("SSD1675A: 4-gray LUT variant {}", lutVariant);
 
         int dcPin   = config.property("dcPin",   25);
         int rstPin  = config.property("rstPin",  17);
@@ -491,20 +503,48 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         }
     }
 
+    /**
+     * The panel's 4-gray RAM polarity differs from {@link FourGrayFrame}'s (bw = red = 1 is white).
+     * WaveShare's reference sends white as 0/0, black as 1/1, light grey as 1/0 and dark grey as 0/1
+     * (BW RAM / RED RAM); written the frame's way, black and white came out swapped on the panel.
+     * That mapping is the BW RAM taking the inverse of the red plane and the RED RAM the inverse of
+     * the BW plane.
+     */
+    static byte[] panelBwRam(FourGrayFrame frame) {
+        return inverted(frame.redPlane());
+    }
+
+    /** See {@link #panelBwRam}. */
+    static byte[] panelRedRam(FourGrayFrame frame) {
+        return inverted(frame.bwPlane());
+    }
+
+    private static byte[] inverted(byte[] plane) {
+        byte[] out = new byte[plane.length];
+        for (int i = 0; i < plane.length; i++) {
+            out[i] = (byte) ~plane[i];
+        }
+        return out;
+    }
+
     private CompletableFuture<Void> writeFourGrayFrame(FourGrayFrame frame) {
         return CompletableFuture.runAsync(() -> {
-            log.debug("SSD1675A: 4-gray frame");
+            log.debug("SSD1675A: 4-gray frame bwCrc={} redCrc={} levels: {}",
+                crc(frame.bwPlane(), 0, frame.bwPlane().length), crc(frame.redPlane(), 0, frame.redPlane().length),
+                grayLevelCounts(frame.bwPlane(), frame.redPlane()));
             waitBusy();
             fourGrayInit();
             sendCommand(CMD_WRITE_BW_RAM);
-            sendData(frame.bwPlane());
+            sendData(panelBwRam(frame));
             setCursor(0, 0);
             sendCommand(CMD_WRITE_RED_RAM);
-            sendData(frame.redPlane());
+            sendData(panelRedRam(frame));
             // Trigger display update sequence — SSD1675A CMD 0x20 (Master Activation); waits for BUSY to clear after refresh
+            log.debug("SSD1675A: 4-gray activate (DUC2=0xC7)");
             sendCommand(CMD_DISP_UPDATE_2, (byte)0xC7);
             sendCommand(CMD_ACTIVATE);
             waitBusy();
+            log.debug("SSD1675A: 4-gray frame complete");
         }, DRIVER_EXECUTOR);
     }
 
@@ -615,12 +655,12 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
 
         // Write custom waveform LUT for 4-gray refresh mode; data sourced from WaveShare EPD_2in9_V2.c reference implementation
         sendCommand(CMD_WRITE_LUT);
-        sendData(GRAY4_LUT, 0, 153);
+        sendData(gray4Lut, 0, 153);
         waitBusy();
-        sendCommand(CMD_EOPT,           GRAY4_LUT[153]);
-        sendCommand(CMD_GATE_VOLTAGE,   GRAY4_LUT[154]);
-        sendCommand(CMD_SOURCE_VOLTAGE, GRAY4_LUT[155], GRAY4_LUT[156], GRAY4_LUT[157]);
-        sendCommand(CMD_VCOM,           GRAY4_LUT[158]);
+        sendCommand(CMD_EOPT,           gray4Lut[153]);
+        sendCommand(CMD_GATE_VOLTAGE,   gray4Lut[154]);
+        sendCommand(CMD_SOURCE_VOLTAGE, gray4Lut[155], gray4Lut[156], gray4Lut[157]);
+        sendCommand(CMD_VCOM,           gray4Lut[158]);
     }
 
     private void configureFullRefreshMode() {
@@ -697,7 +737,30 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         sendCommand(CMD_SET_Y_CURSOR, (byte)(y & 0xFF), (byte)(y >> 8));
     }
 
+    private static String crc(byte[] b, int offset, int length) {
+        CRC32 c = new CRC32();
+        c.update(b, offset, length);
+        return String.format("%08x", c.getValue());
+    }
+
+    /** Pixel counts per shade for a pair of 4-gray planes (white, light grey, dark grey, black). */
+    private static String grayLevelCounts(byte[] bw, byte[] red) {
+        int white = 0, light = 0, dark = 0, black = 0;
+        for (int i = 0; i < bw.length; i++) {
+            int b = bw[i] & 0xFF, r = red[i] & 0xFF;
+            white += Integer.bitCount(b & r);
+            light += Integer.bitCount(b & ~r & 0xFF);
+            dark  += Integer.bitCount(~b & 0xFF & r);
+            black += Integer.bitCount(~b & ~r & 0xFF);
+        }
+        return "white=" + white + " light=" + light + " dark=" + dark + " black=" + black;
+    }
+
     private void sendCommand(byte cmd, byte... data) {
+        if (log.isTraceEnabled()) {
+            log.trace("SSD1675A cmd 0x{} data=[{}]", HexFormat.of().toHexDigits(cmd),
+                HexFormat.ofDelimiter(" ").formatHex(data));
+        }
         dc.state(DigitalState.LOW);
         spi.transfer(new byte[]{cmd});
         if (data.length > 0) {
@@ -719,6 +782,10 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
         assert length >= 0                         : "sendData: length must be >= 0, was " + length;
         assert offset + length <= data.length      : "sendData: offset+length (" + (offset + length)
                                                      + ") exceeds data.length (" + data.length + ")";
+        if (log.isTraceEnabled()) {
+            log.trace("SSD1675A data {} bytes crc={} head=[{}]", length, crc(data, offset, length),
+                HexFormat.ofDelimiter(" ").formatHex(data, offset, offset + Math.min(length, 16)));
+        }
         dc.state(DigitalState.HIGH);
         int remaining = length;
         int pos = offset;
