@@ -17,6 +17,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.List;
 
 final class Icnt86xTouchDriver implements TouchDriver {
@@ -31,6 +32,13 @@ final class Icnt86xTouchDriver implements TouchDriver {
     private static final int MAX_TOUCH_POINTS   = 5;
     private static final int BYTES_PER_POINT     = 7;
 
+    /**
+     * Event id (byte 6 of a point record) at which the chip reports a lift. Inferred from captured
+     * reports, not from the vendor documentation: 1 = new contact, 2 = moving, 3 = stationary, 4 = lift.
+     */
+    static final int EVENT_LIFT = 4;
+
+    private final TouchContactTracker contacts;
     private final I2C          i2c;
     private final DigitalOutput touchRst;
     private final DigitalInput  touchInt;
@@ -42,6 +50,8 @@ final class Icnt86xTouchDriver implements TouchDriver {
         int trstPin  = config.property("touchRstPin",     22);
         int intPin   = config.property("touchIntPin",     27);
         int gpioChip = GpioChipResolver.resolveHeaderChip(config);
+        contacts = new TouchContactTracker(
+            config.property("touchHoldTimeoutMs", (int) TouchContactTracker.DEFAULT_HOLD_TIMEOUT_MS));
 
         i2c = ctx.create(I2C.newConfigBuilder(ctx)
             .id("icnt86x-i2c")
@@ -87,16 +97,18 @@ final class Icnt86xTouchDriver implements TouchDriver {
     public void reset() {
         log.debug("ICNT86X: reset");
         hardwareReset();
+        contacts.clear();
     }
 
     @Override
     public List<TouchPoint> readTouches() {
+        long now = System.nanoTime();
         // Gate on the INT pin before issuing any I2C read. The ICNT86X asserts
         // INT LOW when new touch data is ready and releases it HIGH after the host
-        // clears REG_TOUCH_COUNT (write 0x00). If INT is HIGH, there is no pending
-        // data — return immediately to avoid unnecessary I2C traffic and log spam.
+        // clears REG_TOUCH_COUNT (write 0x00). If INT is HIGH there is no new report, but a
+        // finger resting on the panel is still down: hold it (see TouchContactTracker).
         if (touchInt.isHigh()) {
-            return Collections.emptyList();
+            return contacts.onNoReport(now);
         }
         log.debug("ICNT86X: INT asserted (LOW) — reading touch data");
 
@@ -107,16 +119,17 @@ final class Icnt86xTouchDriver implements TouchDriver {
         int count = countBuf[0] & 0xFF;
 
         if (count == 0) {
+            log.debug("ICNT86X: zero-contact report");
             // Write 0x00 to REG_TOUCH_COUNT (0x1001) to acknowledge and release the INT pin HIGH
             writeRegister(REG_TOUCH_COUNT, (byte)0x00);
             delay(1); // TODO: verify this delay is still required; may be removable once hardware behaviour is confirmed
-            return Collections.emptyList();
+            return contacts.onReport(List.of(), now);
         }
 
-        if (count < 1 || count > MAX_TOUCH_POINTS) {
+        if (count > MAX_TOUCH_POINTS) {
             log.warn("ICNT86X: unexpected touch count {}, discarding", count);
             writeRegister(REG_TOUCH_COUNT, (byte)0x00);
-            return Collections.emptyList();
+            return contacts.onNoReport(now);
         }
 
         // Read touch point coordinates from ICNT86X register 0x1002 (7 bytes per point).
@@ -124,18 +137,31 @@ final class Icnt86xTouchDriver implements TouchDriver {
         readRegister(REG_TOUCH_DATA, pointData);
         // Write 0x00 to REG_TOUCH_COUNT (0x1001) to acknowledge the interrupt — releases INT pin HIGH
         writeRegister(REG_TOUCH_COUNT, (byte)0x00);
-
-        List<TouchPoint> points = new ArrayList<>(count);
-        for (int i = 0; i < count; i++) {
-            int base     = i * BYTES_PER_POINT;
-            int x        = ((pointData[base + 2] & 0xFF) << 8) | (pointData[base + 1] & 0xFF);
-            int y        = ((pointData[base + 4] & 0xFF) << 8) | (pointData[base + 3] & 0xFF);
-            int eventId  = pointData[base + 6] & 0xFF;
-            boolean down = (eventId == 0 || eventId == 2); // press or hold
-            points.add(new TouchPoint(i, x, y, down));
+        if (log.isDebugEnabled()) {
+            log.debug("ICNT86X: raw count={} bytes={}", count, HexFormat.ofDelimiter(" ").formatHex(pointData));
         }
 
-        log.debug("ICNT86X: {} touch contact(s): {}", count, points);
+        List<TouchPoint> points = decode(pointData, count);
+        log.debug("ICNT86X: {} record(s), {} contact(s) down: {}", count, points.size(), points);
+        return contacts.onReport(points, now);
+    }
+
+    /**
+     * Decodes {@code count} 7-byte point records into the contacts that are down. A record with
+     * event id {@link #EVENT_LIFT} is a lift and is left out; every other event id (new contact,
+     * moving, stationary) is a finger on the panel. An empty result means no finger is down.
+     */
+    static List<TouchPoint> decode(byte[] pointData, int count) {
+        List<TouchPoint> points = new ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            int base    = i * BYTES_PER_POINT;
+            int x       = ((pointData[base + 2] & 0xFF) << 8) | (pointData[base + 1] & 0xFF);
+            int y       = ((pointData[base + 4] & 0xFF) << 8) | (pointData[base + 3] & 0xFF);
+            int eventId = pointData[base + 6] & 0xFF;
+            if (eventId != EVENT_LIFT) {
+                points.add(new TouchPoint(i, x, y, true));
+            }
+        }
         return Collections.unmodifiableList(points);
     }
 
