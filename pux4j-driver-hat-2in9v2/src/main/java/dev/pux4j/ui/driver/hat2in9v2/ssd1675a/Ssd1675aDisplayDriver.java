@@ -342,20 +342,42 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
             throw new IllegalArgumentException(
                 "writeRegion: y+height (" + (y + height) + ") exceeds HEIGHT (" + HEIGHT + ")");
         }
+        if ((x % 8) != 0) {
+            throw new IllegalArgumentException(
+                "writeRegion: x must be a multiple of 8 (x=" + x + ")");
+        }
         byte[] regionData = mf.data();
+        int expected = ((width + 7) / 8) * height;
+        if (regionData == null || regionData.length != expected) {
+            throw new IllegalArgumentException("writeRegion: expected " + expected + " bytes for "
+                + width + "x" + height + ", got " + (regionData == null ? "null" : regionData.length));
+        }
         log.debug("SSD1675A: writeRegion ({},{}) {}x{}", x, y, width, height);
+        // The panel refreshes as a whole, and the partial waveform compares the two RAMs. Writing
+        // only the changed window left the rest of one RAM stale, which showed up as an older
+        // image on a later update. So the region is merged into the last frame and both RAMs are
+        // set completely, exactly as for a whole-frame partial.
         return CompletableFuture.runAsync(() -> {
-            waitBusy();
-            partialInit();
-            setWindow(x, y, x + width - 1, y + height - 1);
-            setCursor(x, y);
-            sendCommand(CMD_WRITE_BW_RAM);
-            sendData(regionData);
-            // Trigger display update sequence — SSD1675A CMD 0x20 (Master Activation); waits for BUSY to clear after refresh
-            sendCommand(CMD_DISP_UPDATE_2, (byte)0x0F);
-            sendCommand(CMD_ACTIVATE);
-            waitBusy();
+            byte[] merged = lastFrameBytes.clone();
+            mergeRegion(merged, x, y, width, height, regionData);
+            if (refreshPolicy.shouldFullRefresh(getRefreshStats(), RefreshMode.PARTIAL)) {
+                log.debug("writeRegion: policy upgraded PARTIAL → FULL");
+                doWriteFullFrame(merged);
+            } else {
+                doWritePartialFrame(merged);
+            }
         }, DRIVER_EXECUTOR);
+    }
+
+    /**
+     * Writes a packed region ({@code ceil(width/8)} bytes per row, the layout {@code writeRegion}
+     * receives) into a full frame (row stride {@link #BYTES_PER_ROW}). {@code x} must be a multiple of 8.
+     */
+    static void mergeRegion(byte[] frame, int x, int y, int width, int height, byte[] region) {
+        int rowBytes = (width + 7) / 8;
+        for (int row = 0; row < height; row++) {
+            System.arraycopy(region, row * rowBytes, frame, (y + row) * BYTES_PER_ROW + (x >> 3), rowBytes);
+        }
     }
 
     // --- Frame write helpers ---
@@ -365,7 +387,11 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
             throw new IllegalArgumentException(
                 "writeFullFrame: expected " + FRAME_BYTES + " bytes, got " + (data == null ? "null" : data.length));
         }
-        return CompletableFuture.runAsync(() -> {
+        return CompletableFuture.runAsync(() -> doWriteFullFrame(data), DRIVER_EXECUTOR);
+    }
+
+    private void doWriteFullFrame(byte[] data) {
+        {
             log.debug("writeFullFrame: begin ({} bytes, fullModeConfigured={})", data.length, fullModeConfigured);
             waitBusy();
             if (!fullModeConfigured) {
@@ -398,7 +424,7 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
             System.arraycopy(data, 0, lastFrameBytes, 0, FRAME_BYTES);
             resetRefreshCounters();
             log.debug("writeFullFrame: complete");
-        }, DRIVER_EXECUTOR);
+        }
     }
 
     private CompletableFuture<Void> writeFastFrame(byte[] data) {
@@ -436,11 +462,21 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
             throw new IllegalArgumentException(
                 "writePartialFrame: expected " + FRAME_BYTES + " bytes, got " + (data == null ? "null" : data.length));
         }
-        return CompletableFuture.runAsync(() -> {
+        return CompletableFuture.runAsync(() -> doWritePartialFrame(data), DRIVER_EXECUTOR);
+    }
+
+    private void doWritePartialFrame(byte[] data) {
+        {
             log.debug("writePartialFrame: begin ({} bytes)", data.length);
             waitBusy();
             partialInit();
             setFullWindow();
+            // Previous (displayed) frame to 0x26 (RED RAM) so the partial waveform computes the delta
+            // against what is actually on the panel, then the new frame to 0x24 (BW RAM).
+            log.debug("writePartialFrame: writing 0x26 RED RAM with the previous frame");
+            sendCommand(CMD_WRITE_RED_RAM);
+            sendData(lastFrameBytes);
+            setCursor(0, 0);
             log.debug("writePartialFrame: writing 0x24 BW RAM with new frame");
             sendCommand(CMD_WRITE_BW_RAM);
             sendData(data);
@@ -452,7 +488,7 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
             System.arraycopy(data, 0, lastFrameBytes, 0, FRAME_BYTES);
             partialRefreshCount++;
             log.debug("writePartialFrame: complete (partialCount={})", partialRefreshCount);
-        }, DRIVER_EXECUTOR);
+        }
     }
 
     private CompletableFuture<Void> writeFourGrayFrame(FourGrayFrame frame) {
