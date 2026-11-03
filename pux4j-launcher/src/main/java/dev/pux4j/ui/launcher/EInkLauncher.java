@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.concurrent.CountDownLatch;
 
@@ -41,6 +42,7 @@ public final class EInkLauncher {
         }
         SceneContent content = selectContent();
         LOG.info("Launching '{}'", content.name());
+        applyDefaultProperties(content.defaultProperties());
 
         // Toolkit first (drivers such as the emulator open windows through it), but drivers
         // are constructed here, off the FX thread — see EInkBridge's class javadoc.
@@ -72,6 +74,21 @@ public final class EInkLauncher {
         bridge.stop();
         Platform.exit();
         System.exit(1);
+    }
+
+    /**
+     * Sets each application-supplied default as a system property unless the user has already set
+     * it, so an explicit {@code -D} option always wins. Must run before the bridge is built.
+     */
+    static void applyDefaultProperties(Map<String, String> defaults) {
+        defaults.forEach((key, value) -> {
+            if (System.getProperty(key) == null) {
+                System.setProperty(key, value);
+                LOG.info("Application default {}={}", key, value);
+            } else {
+                LOG.info("Application default {} not applied; already set to {}", key, System.getProperty(key));
+            }
+        });
     }
 
     private static List<SceneContent> findContent() {
