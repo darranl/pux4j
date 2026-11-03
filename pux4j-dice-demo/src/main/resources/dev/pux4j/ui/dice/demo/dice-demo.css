@@ -41,8 +41,11 @@
     -fx-background-color: #e8e8e8;
 }
 
+/* Pressed: invert the button (black, white text). On a monochrome e-paper panel a grey would
+   threshold to nothing, and the pressed look has to stay visible around a finger resting on it. */
 .action-button:pressed {
-    -fx-background-color: #d0d0d0;
+    -fx-background-color: black;
+    -fx-text-fill: white;
 }
 
 /* The bridge inverts disabled controls in the captured frame (white on black). Modena dims
