@@ -94,5 +94,28 @@
                 </dependency>
             </dependencies>
         </profile>
+        <!-- Hardware bundle for diamondpi: launcher + the demo apps + the 2.9" V2 HAT drivers
+             (SSD1675A + ICNT86X) in place of the emulator. Built with the aarch64 JavaFX
+             classifier (-Djavafx.platform=linux-aarch64); used by scripts/deploy-eink.sh with the 2in9v2 HAT option. -->
+        <profile>
+            <id>bundle-hat-2in9v2</id>
+            <dependencies>
+                <dependency>
+                    <groupId>dev.pux4j.ui</groupId>
+                    <artifactId>pux4j-driver-hat-2in9v2</artifactId>
+                    <version>${project.version}</version>
+                </dependency>
+                <dependency>
+                    <groupId>dev.pux4j.ui</groupId>
+                    <artifactId>pux4j-demo</artifactId>
+                    <version>${project.version}</version>
+                </dependency>
+                <dependency>
+                    <groupId>dev.pux4j.ui</groupId>
+                    <artifactId>pux4j-dice-demo</artifactId>
+                    <version>${project.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
     </profiles>
 </project>
