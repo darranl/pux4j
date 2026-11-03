@@ -59,6 +59,11 @@ public final class RenderSession {
             : prepareMonochrome((MonochromeFrame) packed);
     }
 
+    /** The pixel format this session renders in. */
+    public PixelFormat pixelFormat() {
+        return options.pixelFormat();
+    }
+
     /** Discard frame history. Use after a hardware reset or sleep/wake cycle, when the
      * display's physical state no longer matches the last known frame. */
     public void reset() {

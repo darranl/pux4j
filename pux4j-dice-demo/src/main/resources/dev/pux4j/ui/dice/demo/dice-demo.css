@@ -48,6 +48,13 @@
     -fx-text-fill: white;
 }
 
+/* A 4-gray refresh takes seconds and cannot be partial, so a pressed look would cost a whole
+   extra refresh per tap. The bridge marks the scene root with pux4j-four-gray; cancel it there. */
+.pux4j-four-gray .action-button:pressed {
+    -fx-background-color: white;
+    -fx-text-fill: black;
+}
+
 /* The bridge inverts disabled controls in the captured frame (white on black). Modena dims
    :disabled with -fx-opacity: 0.4, which would be inverted into text that thresholds away on
    a monochrome panel; reset it. */

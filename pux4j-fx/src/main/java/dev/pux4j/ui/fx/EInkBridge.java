@@ -799,6 +799,7 @@ public final class EInkBridge {
                     + "bridge.displayWidth()/displayHeight(); EInkBridge cannot resize it");
         }
         warnIfFillNotOpaque(scene);
+        applyDisplayStyleClass(scene.getRoot(), session.pixelFormat());
 
         this.scene = scene;
         contactSet.clear();
@@ -817,6 +818,24 @@ public final class EInkBridge {
         LOG.info("EInkBridge started (touch {}, capture {})",
                 touchDriver != null ? "enabled" : "disabled",
                 captureIntervalMs > 0 ? captureIntervalMs + "ms" : "manual (requestRefresh only)");
+    }
+
+    /** Style class added to the scene root when the display renders in four grey levels. */
+    public static final String STYLE_CLASS_FOUR_GRAY = "pux4j-four-gray";
+
+    /** Style class added to the scene root when the display renders in black and white. */
+    public static final String STYLE_CLASS_MONOCHROME = "pux4j-monochrome";
+
+    /**
+     * Adds the style class describing the output format to the scene root, so an app's
+     * stylesheet can adapt when it runs under the bridge (for example, dropping a pressed look
+     * on a panel whose refresh takes seconds). Nothing adds these classes on a desktop run, so
+     * such rules are inert there.
+     */
+    static void applyDisplayStyleClass(javafx.scene.Node root, PixelFormat format) {
+        var classes = root.getStyleClass();
+        classes.removeAll(STYLE_CLASS_FOUR_GRAY, STYLE_CLASS_MONOCHROME);
+        classes.add(format == PixelFormat.FOUR_GRAY ? STYLE_CLASS_FOUR_GRAY : STYLE_CLASS_MONOCHROME);
     }
 
     /**
