@@ -64,10 +64,35 @@
     </dependencies>
 
     <profiles>
-        <!-- Desktop bundle: launcher + the demo apps + the emulator drivers. Used by
-             run-emulator.sh. The hardware bundle below is the same shape. -->
+        <!-- Desktop bundle: launcher + the apps + the emulator drivers. On by default, so a plain
+             `mvn install` or `mvn package` leaves the runnable bundle in target/run-lib for
+             run-emulator.sh. Maven turns an activeByDefault profile off when another profile of
+             this pom is activated, so the hardware bundles below do not build it. -->
         <profile>
             <id>bundle-emulator</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-dependency-plugin</artifactId>
+                        <version>3.7.0</version>
+                        <executions>
+                            <execution>
+                                <id>copy-run-lib</id>
+                                <phase>package</phase>
+                                <goals><goal>copy-dependencies</goal></goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.directory}/run-lib</outputDirectory>
+                                    <includeScope>runtime</includeScope>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
             <dependencies>
                 <dependency>
                     <groupId>dev.pux4j.ui</groupId>

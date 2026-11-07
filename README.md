@@ -29,7 +29,7 @@ application code.
 cd pux4j-ui
 ./pux4j-validation/run-smoke-emulator.sh          # smoke test in JavaFX window
 ./pux4j-validation/run-validation-emulator.sh     # interactive validation (mouse = touch)
-./pux4j-launcher/run-emulator.sh <app>              # demo / dice-demo through EInkBridge on the emulator (--list)
+./pux4j-launcher/run-emulator.sh <app>            # demo, dice-demo, smoke, validation on the emulator (--list); build first: mvn install
 ./pux4j-bridge-smoke/run-demo-check.sh            # headless: counter demo + taps on both panel sizes, PNG frames
 ./pux4j-bridge-smoke/run-dice-check.sh            # headless: dice demo, plays a whole turn on both panel sizes
 ```
