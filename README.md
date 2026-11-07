@@ -18,22 +18,16 @@ without any hardware: a window on your computer, the **emulator**, behaves like 
 
 `pux4j` comes with four small apps, so you can see what it does and check that a display works.
 
-| App | What it is |
-|---|---|
-| `demo` | A counter. Tap the **−** and **+** buttons to change the number. |
-| `dice-demo` | Five dice. Roll them up to three times in a turn; before the second and third roll, tap a die to save it. **Clear** starts again. |
-| `smoke` | A quick check of the display. It draws a short series of test patterns (arrows, bars, stripes, a checkerboard and some boxes) and ends with PASS or FAIL. It does not use touch. |
-| `validation` | A step-by-step check of the display and the touch screen. It asks you to tap targets on the panel and reports PASS or FAIL for each of its 10 steps, then writes a report file. |
-
-What they look like on each panel. These are the frames `pux4j` sends to the panel, captured without
-hardware, so they show the pixels but not the e-paper look of the real screen.
-
-| | 2.9" HAT (296×128) | 2.13" HAT (250×122) |
+| App | What it is | What it looks like |
 |---|---|---|
-| `demo` | <img src="docs/images/demo-2in9.png" alt="The counter app on the 2.9 inch panel: a minus button, the number 1 and a plus button" width="298"/> | <img src="docs/images/demo-2in13.png" alt="The counter app on the 2.13 inch panel: a minus button, the number 1 and a plus button" width="252"/> |
-| `dice-demo` | <img src="docs/images/dice-demo-2in9.png" alt="The dice app on the 2.9 inch panel: five dice showing a roll, with Clear and Roll 2 buttons" width="298"/> | <img src="docs/images/dice-demo-2in13.png" alt="The dice app on the 2.13 inch panel: five dice showing a roll, with Clear and Roll 2 buttons" width="252"/> |
-| `validation` (its first step) | <img src="docs/images/validation-2in9.png" alt="The validation test on the 2.9 inch panel: Step 1 of 10, Touch the CIRCLE" width="298"/> | not captured yet |
-| `smoke` | not captured yet | not captured yet |
+| `demo` | A counter. Tap the **−** and **+** buttons to change the number. | <img src="docs/images/demo.png" alt="The counter app: a minus button, the number 1 and a plus button" width="298"/> |
+| `dice-demo` | Five dice. Roll them up to three times in a turn; before the second and third roll, tap a die to save it. **Clear** starts again. | <img src="docs/images/dice-demo.png" alt="The dice app: five dice showing a roll, with Clear and Roll 2 buttons" width="298"/> |
+| `smoke` | A quick check of the display. It draws a short series of test patterns (arrows, bars, stripes, a checkerboard and some boxes) and ends with PASS or FAIL. It does not use touch. | not captured yet |
+| `validation` | A step-by-step check of the display and the touch screen. It asks you to tap targets on the panel and reports PASS or FAIL for each of its 10 steps, then writes a report file. | <img src="docs/images/validation.png" alt="The validation test, step 1 of 10: Touch the CIRCLE" width="298"/> (its first step) |
+
+The pictures are the frames `pux4j` sends to the 2.9" panel (296×128), captured without hardware, so they
+show the pixels but not the e-paper look of the real screen. The 2.13" panel (250×122) shows the same
+screens at its smaller size.
 
 `demo` and `dice-demo` are **JavaFX apps**: ordinary JavaFX programs that `pux4j` shows on the panel.
 `smoke` and `validation` are **driver tests**: they talk to the display and touch hardware directly,
