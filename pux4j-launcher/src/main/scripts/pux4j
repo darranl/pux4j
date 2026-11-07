@@ -2,18 +2,44 @@
 # Run a pux4j app on the attached e-paper display (JVM).
 #
 # Usage:
-#   pux4j <app> [<app args> ...] [-D<pux4j property>=<value> ...]
 #   pux4j --list
+#   pux4j <app> [<app args> ...] [-D<property>=<value> ...]
+#   pux4j -h | --help
 #
 # Two kinds of app share one name space (--list shows each with its kind):
 #   JavaFX app   run through the eInk bridge; extra arguments are ignored.
 #   driver test  a non-JavaFX test of the raw drivers (e.g. smoke, validation); everything after
 #                the name is passed to it unchanged, e.g.  pux4j validation --start-step 3
-# Only options starting with -D are JVM system properties; every other argument goes to the
-# launcher. <app> is optional while only one app is installed. Exit codes: 0 success,
-# 1 failure, 2 usage error (unknown or missing app). Logs to ~/tmp/run-log.txt as well as the
-# terminal. JavaFX needs a display session even though nothing is shown on it; DISPLAY
-# defaults to :0 (override by exporting it first).
+# <app> is the first argument that does not start with "-". It is optional while only one app is
+# installed. Exit codes: 0 success, 1 failure, 2 usage error (unknown or missing app).
+#
+# Options:
+#   -D<property>=<value>   JVM system property, e.g. -Dpux4j.display.width=250. Every other
+#                          argument goes to the launcher.
+#
+# Environment:
+#   PUX4J_JAVA_OPTS   extra JVM options, split on whitespace like ordinary shell options and
+#                     placed before the module arguments, e.g.
+#                       PUX4J_JAVA_OPTS="-Xmx256m -Dfoo=bar" pux4j demo
+#   DISPLAY           defaults to :0. The JavaFX apps (not smoke or validation) need a desktop
+#                     session on the Pi even though nothing is shown on it, and DISPLAY must
+#                     point at that session; export DISPLAY=:1 first if the desktop is on :1.
+#
+# Logs:
+#   Output goes to the terminal and to <bundle>/logs/<app>.log, overwritten on every run of that
+#   app. --list and --help write no log. The bundle directory is exported as PUX4J_HOME.
+#
+# Trace logging:
+#   conf/logback-trace.xml in the bundle is a verbose logback configuration:
+#     pux4j demo -Dlogback.configurationFile="$PUX4J_HOME/conf/logback-trace.xml"
+#   PUX4J_HOME stands for the bundle directory; pux4j sets it for the app but not for your shell,
+#   so write the path out (--help ends with a "Bundle:" line giving it) or export PUX4J_HOME first.
+#
+# ByteMan (optional, needs ByteMan installed on the Pi; its agent jar is not part of the bundle):
+#   the rule files are in <bundle>/byteman/ (PUX4J_HOME as above). Pass the agent through PUX4J_JAVA_OPTS, e.g.
+#     PUX4J_JAVA_OPTS="-javaagent:$BYTEMAN_HOME/lib/byteman.jar=script:$PUX4J_HOME/byteman/hardware-trace.btm" \
+#       pux4j smoke
+#   Several rule files are comma separated: =script:a.btm,script:b.btm
 set -euo pipefail
 
 SCRIPT_SOURCE="${BASH_SOURCE[0]}"
@@ -23,28 +49,52 @@ while [ -h "$SCRIPT_SOURCE" ]; do
   [[ $SCRIPT_SOURCE != /* ]] && SCRIPT_SOURCE="$SCRIPT_DIR/$SCRIPT_SOURCE"
 done
 SCRIPT_DIR=$(cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)
-LIB_DIR="$SCRIPT_DIR/../lib"
+HOME_DIR=$(cd -P "$SCRIPT_DIR/.." && pwd)
+LIB_DIR="$HOME_DIR/lib"
+export PUX4J_HOME="$HOME_DIR"
 
 case "${1:-}" in
-  -h|--help) grep '^#' "$0" | sed 's/^# \?//'; exit 0 ;;
+  -h|--help)
+    grep '^#' "$0" | sed 's/^# \?//' | sed '1d'
+    echo "Bundle: $HOME_DIR"
+    exit 0 ;;
 esac
 
 JVM_ARGS=()   # -D options
 APP_ARGS=()   # app name, its arguments, --list (anything not -D*, passed through unchanged)
+APP_NAME=""   # first argument not starting with "-"
+LIST=0
 for arg in "$@"; do
   case "$arg" in
     -D*) JVM_ARGS+=("$arg") ;;
-    *)   APP_ARGS+=("$arg") ;;
+    *)   APP_ARGS+=("$arg")
+         if [ "$arg" = "--list" ]; then LIST=1; fi
+         if [ -z "$APP_NAME" ] && [[ $arg != -* ]]; then APP_NAME="$arg"; fi ;;
   esac
 done
 
+EXTRA_OPTS=()
+if [ -n "${PUX4J_JAVA_OPTS:-}" ]; then
+  read -r -a EXTRA_OPTS <<< "$PUX4J_JAVA_OPTS"
+fi
+
 export DISPLAY="${DISPLAY:-:0}"
-mkdir -p "$HOME/tmp"
 
 MODULE_PATH="$(ls "$LIB_DIR"/*.jar | tr '\n' ':')"
-java -Xmx192m \
-    --module-path "$MODULE_PATH" \
-    --enable-native-access=javafx.graphics,com.pi4j.plugin.ffm \
-    "${JVM_ARGS[@]}" \
-    -m dev.pux4j.ui.launcher/dev.pux4j.ui.launcher.EInkLauncher \
-    "${APP_ARGS[@]}" 2>&1 | tee "$HOME/tmp/run-log.txt"
+run_java() {
+  java -Xmx192m \
+      --module-path "$MODULE_PATH" \
+      --enable-native-access=javafx.graphics,com.pi4j.plugin.ffm \
+      ${EXTRA_OPTS[@]+"${EXTRA_OPTS[@]}"} \
+      ${JVM_ARGS[@]+"${JVM_ARGS[@]}"} \
+      -m dev.pux4j.ui.launcher/dev.pux4j.ui.launcher.EInkLauncher \
+      ${APP_ARGS[@]+"${APP_ARGS[@]}"} 2>&1
+}
+
+if [ "$LIST" -eq 1 ] || [ -z "$APP_NAME" ]; then
+  run_java
+else
+  mkdir -p "$HOME_DIR/logs"
+  # pipefail makes the pipeline's status the java process's status
+  run_java | tee "$HOME_DIR/logs/$APP_NAME.log"
+fi

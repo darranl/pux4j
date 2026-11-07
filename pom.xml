@@ -104,6 +104,24 @@
                 <javafx.platform>mac</javafx.platform>
             </properties>
         </profile>
+
+        <!-- Hardware bundle profiles (the bundle itself is assembled in pux4j-launcher). The ids
+             repeat there on purpose: -P activates every profile with the id, so here they only
+             pin the JavaFX classifier to aarch64 for the whole reactor. They must stay AFTER the
+             OS profiles above: when several active profiles set the same property the one
+             declared last wins, which is what keeps the OS profile from overriding them. -->
+        <profile>
+            <id>bundle-hat-2in13v4</id>
+            <properties>
+                <javafx.platform>linux-aarch64</javafx.platform>
+            </properties>
+        </profile>
+        <profile>
+            <id>bundle-hat-2in9v2</id>
+            <properties>
+                <javafx.platform>linux-aarch64</javafx.platform>
+            </properties>
+        </profile>
     </profiles>
 
     <dependencyManagement>

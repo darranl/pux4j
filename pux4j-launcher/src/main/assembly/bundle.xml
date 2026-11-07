@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.2.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 https://maven.apache.org/xsd/assembly-2.2.0.xsd">
+  <!-- Hardware bundle: a ready-to-copy directory, target/pux4j/, holding lib/, bin/, conf/ and
+       byteman/. Active only in the bundle-hat-* profiles. -->
+  <id>bundle</id>
+  <formats>
+    <format>dir</format>
+  </formats>
+  <includeBaseDirectory>false</includeBaseDirectory>
+
+  <dependencySets>
+    <dependencySet>
+      <outputDirectory>lib</outputDirectory>
+      <scope>runtime</scope>
+      <useProjectArtifact>true</useProjectArtifact>
+      <outputFileNameMapping>${artifact.artifactId}-${artifact.baseVersion}${dashClassifier?}.${artifact.extension}</outputFileNameMapping>
+      <fileMode>0644</fileMode>
+    </dependencySet>
+  </dependencySets>
+
+  <fileSets>
+    <fileSet>
+      <directory>src/main/scripts</directory>
+      <outputDirectory>bin</outputDirectory>
+      <includes>
+        <include>pux4j</include>
+        <include>install.sh</include>
+      </includes>
+      <fileMode>0755</fileMode>
+      <lineEnding>unix</lineEnding>
+    </fileSet>
+    <fileSet>
+      <directory>src/main/scripts</directory>
+      <outputDirectory>conf</outputDirectory>
+      <includes>
+        <include>logback-trace.xml</include>
+      </includes>
+      <fileMode>0644</fileMode>
+    </fileSet>
+    <fileSet>
+      <directory>${project.basedir}/../pux4j-validation/src/main/byteman</directory>
+      <outputDirectory>byteman</outputDirectory>
+      <includes>
+        <include>*.btm</include>
+      </includes>
+      <fileMode>0644</fileMode>
+    </fileSet>
+  </fileSets>
+</assembly>

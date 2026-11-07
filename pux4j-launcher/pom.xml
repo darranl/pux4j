@@ -19,6 +19,108 @@
         HAT) are whatever is on the module path, so a bundle is just a dependency set.
     </description>
 
+    <!-- JavaFX comes only from the dependencies declared below, with the platform classifier of
+         THIS build. The pux4j modules and the JavaFX poms are resolved through their own poms,
+         which Maven evaluates without the -P profiles of this build, so on a laptop they would
+         pull the laptop's classifier (x86 jars into a bundle for the Pi); excluding their JavaFX
+         avoids that without needing -Djavafx.platform. -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>dev.pux4j.ui</groupId>
+                <artifactId>pux4j-fx</artifactId>
+                <version>${project.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.openjfx</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>dev.pux4j.ui</groupId>
+                <artifactId>pux4j-demo</artifactId>
+                <version>${project.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.openjfx</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>dev.pux4j.ui</groupId>
+                <artifactId>pux4j-dice-demo</artifactId>
+                <version>${project.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.openjfx</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>dev.pux4j.ui</groupId>
+                <artifactId>pux4j-validation</artifactId>
+                <version>${project.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.openjfx</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-base</artifactId>
+                <version>${javafx.version}</version>
+                <classifier>${javafx.platform}</classifier>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.openjfx</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-graphics</artifactId>
+                <version>${javafx.version}</version>
+                <classifier>${javafx.platform}</classifier>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.openjfx</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-controls</artifactId>
+                <version>${javafx.version}</version>
+                <classifier>${javafx.platform}</classifier>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.openjfx</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>org.openjfx</groupId>
+                <artifactId>javafx-fxml</artifactId>
+                <version>${javafx.version}</version>
+                <classifier>${javafx.platform}</classifier>
+                <exclusions>
+                    <exclusion>
+                        <groupId>org.openjfx</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
     <dependencies>
         <dependency>
             <groupId>dev.pux4j.ui</groupId>
@@ -43,6 +145,16 @@
             <classifier>${javafx.platform}</classifier>
         </dependency>
         <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-controls</artifactId>
+            <classifier>${javafx.platform}</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.openjfx</groupId>
+            <artifactId>javafx-fxml</artifactId>
+            <classifier>${javafx.platform}</classifier>
+        </dependency>
+        <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-api</artifactId>
         </dependency>
@@ -62,6 +174,58 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <!-- Shared by the bundle-hat-* profiles, which only have to name the plugin: the
+                     bundle directory target/pux4j (src/main/assembly/bundle.xml). -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-assembly-plugin</artifactId>
+                    <version>3.7.1</version>
+                    <executions>
+                        <execution>
+                            <id>hat-bundle</id>
+                            <phase>package</phase>
+                            <goals><goal>single</goal></goals>
+                            <configuration>
+                                <descriptors>
+                                    <descriptor>src/main/assembly/bundle.xml</descriptor>
+                                </descriptors>
+                                <finalName>pux4j</finalName>
+                                <appendAssemblyId>false</appendAssemblyId>
+                                <attach>false</attach>
+                                <outputDirectory>${project.build.directory}</outputDirectory>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+                <!-- Empties target/pux4j first, so a bundle never keeps jars of an earlier build
+                     (for example the other HAT's driver). -->
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-clean-plugin</artifactId>
+                    <version>3.4.0</version>
+                    <executions>
+                        <execution>
+                            <id>clean-hat-bundle</id>
+                            <phase>prepare-package</phase>
+                            <goals><goal>clean</goal></goals>
+                            <configuration>
+                                <excludeDefaultDirectories>true</excludeDefaultDirectories>
+                                <filesets>
+                                    <fileset>
+                                        <directory>${project.build.directory}/pux4j</directory>
+                                    </fileset>
+                                </filesets>
+                            </configuration>
+                        </execution>
+                    </executions>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
 
     <profiles>
         <!-- Desktop bundle: launcher + the apps + the emulator drivers. On by default, so a plain
@@ -118,9 +282,22 @@
         </profile>
         <!-- Hardware bundle for the 2.13" V4 HAT: launcher + the apps + the HAT drivers
              (SSD1680 + GT1151Q) in place of the emulator. Built with the aarch64 JavaFX
-             classifier (-Djavafx.platform=linux-aarch64); built by the deploy script. -->
+             classifier (set by the same-named profile in the root pom). `mvn package
+             -Pbundle-hat-2in13v4` assembles the ready-to-copy directory target/pux4j. -->
         <profile>
             <id>bundle-hat-2in13v4</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-clean-plugin</artifactId>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-assembly-plugin</artifactId>
+                    </plugin>
+                </plugins>
+            </build>
             <dependencies>
                 <dependency>
                     <groupId>dev.pux4j.ui</groupId>
@@ -152,9 +329,22 @@
         </profile>
         <!-- Hardware bundle for the 2.9" V2 HAT: launcher + the apps + the HAT drivers
              (SSD1675A + ICNT86X) in place of the emulator. Built with the aarch64 JavaFX
-             classifier (-Djavafx.platform=linux-aarch64); built by the deploy script with the 2in9v2 HAT option. -->
+             classifier (set by the same-named profile in the root pom). `mvn package
+             -Pbundle-hat-2in9v2` assembles the ready-to-copy directory target/pux4j. -->
         <profile>
             <id>bundle-hat-2in9v2</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-clean-plugin</artifactId>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-assembly-plugin</artifactId>
+                    </plugin>
+                </plugins>
+            </build>
             <dependencies>
                 <dependency>
                     <groupId>dev.pux4j.ui</groupId>
