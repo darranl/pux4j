@@ -16,7 +16,7 @@
 #                     otherwise your local user name)
 #   --dir <dir>       Directory on the Pi that will contain the "pux4j" bundle directory.
 #                     Relative paths are relative to the Pi user's home; a leading "~/" is
-#                     accepted and means the same. (Quote it, or the laptop shell expands the ~.)
+#                     accepted and means the same. (Quote it, or your local shell expands the ~.)
 #                     Default: applications   (the bundle goes to ~/applications/pux4j)
 #   --dry-run         Print what would be done without connecting or changing anything
 #   -h, --help        Show this help

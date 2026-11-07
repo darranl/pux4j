@@ -12,7 +12,7 @@
 
     <artifactId>pux4j-demo</artifactId>
     <name>pux4j :: Demo</name>
-    <description>Reference JavaFX demo application. Runs against emulator on laptop or real hardware on Pi via driver config.</description>
+    <description>Reference JavaFX demo application. Runs against the emulator on a build machine or real hardware on a Pi via driver config.</description>
 
     <dependencies>
         <dependency>

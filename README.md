@@ -15,8 +15,7 @@ application code.
 
 ## Supported hardware
 
-This is the one place that maps a HAT to the names used everywhere else (build profile,
-emulator profile, driver names).
+For each HAT, this table gives the names used by the build, the emulator and the drivers.
 
 | Common name | Panel | Display chip | Touch chip | Tested on | Build profile (`-P`) | Emulator profile |
 |---|---|---|---|---|---|---|
@@ -24,8 +23,7 @@ emulator profile, driver names).
 | **2.13" Touch e-Paper HAT (V4)** | 250×122, monochrome | SSD1680 | GT1151Q | Raspberry Pi Zero 2 W | `bundle-hat-2in13v4` | `ssd1680` |
 
 - Both are tested on Raspberry Pi OS 12 (Debian bookworm), 64-bit (aarch64). Any other Pi with the
-  40-pin header should work with the same HAT but has not been tested; the Pi model does not
-  decide which HAT you have.
+  40-pin header should work with the same HAT but has not been tested.
 - **The HAT is chosen when you build, not detected.** The drivers only check that they are
   running on a Raspberry Pi; nothing probes which HAT is attached. A bundle contains the drivers
   for exactly one HAT, so build the bundle that matches the HAT on that Pi. A mismatch does not
@@ -39,11 +37,11 @@ emulator profile, driver names).
 
 ## What you need
 
-**On the laptop (where you build):** Java 25 (any JDK 25 distribution) and Maven (3.9 and 3.10
+**On the build machine (where you build):** Java 25 (any JDK 25 distribution) and Maven (3.9 and 3.10
 tested). The first build downloads the dependencies, including the aarch64 JavaFX jars used for
 Pi bundles, from Maven Central, so it needs network access and takes a few minutes. The build and
 these instructions are tested on Arch Linux, x86_64. Some JavaFX tests are skipped when there is
-no display, and Pi4J logs a "no suitable user group" error line in some tests on a laptop; both are
+no display, and Pi4J logs a "no suitable user group" error line in some tests on a build machine; both are
 expected.
 
 **On each Raspberry Pi (where you run):**
@@ -65,7 +63,7 @@ expected.
    even though nothing is shown on it. Raspberry Pi OS with the desktop has one by default (a
    monitor does not need to be attached). The `smoke` and `validation` tests do not need it. See
    [DISPLAY](#display-and-the-desktop-session).
-4. **`ssh` access** from the laptop (key-based login is easiest), and `tar` on the Pi (a standard
+4. **`ssh` access** from the build machine (key-based login is easiest), and `tar` on the Pi (a standard
    part of Raspberry Pi OS).
 
 You do not need `~/bin` on the Pi's `PATH`. If it is not, call `~/bin/pux4j` or the full path
@@ -92,7 +90,7 @@ Pi bundle (`-Pbundle-hat-...`) are separate outputs; building one does not refre
 
 ---
 
-## Run on the laptop (emulator)
+## Run on the build machine (emulator)
 
 No hardware needed. The emulator is selected automatically on any machine that is not a Raspberry Pi.
 
@@ -226,7 +224,7 @@ java.lang.UnsupportedOperationException: Unable to open DISPLAY
   The same variable carries a [ByteMan](https://byteman.jboss.org/) agent for SPI-level hardware
   tracing: the rule files are in the bundle's `byteman/` directory, the ByteMan agent jar is not
   shipped. `pux4j --help` shows an example.
-- Pull a log back to the laptop with `scp <host>:applications/pux4j/logs/demo.log .`.
+- Pull a log back to the build machine with `scp <host>:applications/pux4j/logs/demo.log .`.
 
 ---
 
@@ -271,8 +269,8 @@ pux4j/
 └── pux4j-bundle/               Builds the runnable bundles (emulator and Pi); nothing depends on it
 ```
 
-GraalVM native images and the planned native C API live in the separate `pux4j-native`
-repository; see its README.
+The same apps can also be built as native images, and a native C API is planned; both live in the
+separate `pux4j-native` repository, see its README.
 
 ### `pux4j-core` and the driver modules
 
@@ -303,7 +301,7 @@ any demo, emulator or driver. `pux4j-bundle` is the module that builds the runna
 (the emulator bundle in `target/run-lib`, a Pi bundle per HAT profile in `target/pux4j`), together
 with the `pux4j` and `install.sh` scripts and `run-emulator.sh`; no module depends on it.
 
-The launcher (`pux4j` on a Pi, `run-emulator.sh` on a laptop) lists and runs two kinds of app in
+The launcher (`pux4j` on a Pi, `run-emulator.sh` on the build machine) lists and runs two kinds of app in
 one name space:
 
 - **JavaFX apps** (`SceneContent` providers, such as `demo` and `dice-demo`) run through the
@@ -331,7 +329,6 @@ pipeline. See [Emulating different hardware](#emulating-different-hardware).
 | Foreign Function & Memory API | All hardware access — no JNI |
 | Pi4J v4 with `pi4j-plugin-ffm` | SPI and I2C providers |
 | JavaFX | Scene graph and application framework (`pux4j-fx` and the apps) |
-| GraalVM native image | Ahead-of-time compilation for Pi deployment (`pux4j-native`) |
 | JPMS | Module system — every module has a `module-info.java` |
 | SLF4J + Logback | Logging |
 | Maven | Multi-module build |
@@ -342,7 +339,7 @@ pipeline. See [Emulating different hardware](#emulating-different-hardware).
 
 Working today: the drivers for both HATs, the emulator, the JavaFX bridge, the launcher with the
 `demo`, `dice-demo`, `smoke` and `validation` apps, JVM bundles for both HATs deployed with
-`scripts/deploy.sh`, and native images through `pux4j-native`.
+`scripts/deploy.sh`, and, through `pux4j-native`, the same apps built as native images.
 
 Not available yet: published Maven artifacts, a continuous-integration build, and the native C
 API. Building on the Pi itself is not documented yet.

@@ -20,7 +20,7 @@ Icon attribution and previews are documented in [src/main/resources/icons/ATTRIB
 Build first (from the repository root, `mvn install`; for a Pi `mvn package -Pbundle-hat-...`, see
 the [main README](../README.md)). The tests are run through the launcher.
 
-**On a laptop** (against the JavaFX emulator; mouse press = touch down, release = touch up):
+**On the build machine** (against the JavaFX emulator; mouse press = touch down, release = touch up):
 
 ```bash
 pux4j-bundle/run-emulator.sh smoke

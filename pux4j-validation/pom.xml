@@ -67,7 +67,7 @@
     </dependencies>
 
     <profiles>
-        <!-- Emulator, so the smoke and validation tests can run against it on a laptop. Active by
+        <!-- Emulator, so the smoke and validation tests can run against it on a build machine. Active by
              default; Maven turns an activeByDefault profile off when another profile of this pom is
              activated, so the launcher's hardware bundle profile ids (repeated below as empty
              profiles) leave the emulator out of a Pi bundle. -->

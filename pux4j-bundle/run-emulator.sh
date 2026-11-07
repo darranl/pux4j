@@ -10,7 +10,8 @@
 # "validation"; everything after the name is passed to them unchanged). <app> is required while
 # more than one app is on the module path; --list shows them with their kind. Only -D* options
 # are JVM properties. Exit codes: 0 success, 1 failure, 2 usage error.
-# Display size/panel: -Dpux4j.display.* (see EInkBridge).
+# Emulated panel and window scale: -Dpux4j.emulator.display=ssd1675a|ssd1680 and
+# -Dpux4j.emulator.scale=<n> (see the README, "Emulating different hardware").
 #
 # This script only runs; it never builds. Build first from the repository root: mvn install (or mvn package).
 # After editing sources, build again: the script runs whatever the last build left in target/.

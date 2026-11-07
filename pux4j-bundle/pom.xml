@@ -21,8 +21,8 @@
 
     <!-- JavaFX comes only from the dependencies declared below, with the platform classifier of
          THIS build. The pux4j modules and the JavaFX poms are resolved through their own poms,
-         which Maven evaluates without the -P profiles of this build, so on a laptop they would
-         pull the laptop's classifier (x86 jars into a bundle for the Pi); excluding their JavaFX
+         which Maven evaluates without the -P profiles of this build, so on a build machine they would
+         pull the build machine's classifier (x86 jars into a bundle for the Pi); excluding their JavaFX
          avoids that without needing -Djavafx.platform. -->
     <dependencyManagement>
         <dependencies>
