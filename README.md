@@ -8,13 +8,113 @@
 integrating them with JavaFX applications.
 
 Write a standard JavaFX application. On desktop it renders normally. On a Raspberry Pi with
-a WaveShare eInk HAT it drives the eInk panel instead — no hardware-specific logic in your
-application code.
+a WaveShare eInk HAT (an add-on board that plugs onto the Pi) it drives the eInk panel instead — no
+hardware-specific logic in your application code. Two HATs are supported today. You can try everything
+without any hardware: a window on your computer, the **emulator**, behaves like the eInk panel.
+
+---
+
+## The four demo apps
+
+`pux4j` comes with four small apps, so you can see what it does and check that a display works.
+
+| App | What it is |
+|---|---|
+| `demo` | A counter. Tap the **−** and **+** buttons to change the number. |
+| `dice-demo` | Five dice. Roll them up to three times in a turn; before the second and third roll, tap a die to save it. **Clear** starts again. |
+| `smoke` | A quick check of the display. It draws a short series of test patterns (arrows, bars, stripes, a checkerboard and some boxes) and ends with PASS or FAIL. It does not use touch. |
+| `validation` | A step-by-step check of the display and the touch screen. It asks you to tap targets on the panel and reports PASS or FAIL for each of its 10 steps, then writes a report file. |
+
+`demo` and `dice-demo` are **JavaFX apps**: ordinary JavaFX programs that `pux4j` shows on the panel.
+`smoke` and `validation` are **driver tests**: they talk to the display and touch hardware directly,
+without JavaFX, so they are useful for checking a new setup.
+
+---
+
+## Ways of working
+
+`pux4j` is built with [Maven](https://maven.apache.org/), a Java build tool. There are three ways to use it:
+
+1. **Try it in the emulator.** On an x86_64 Linux machine with Java 25 and Maven. No Raspberry Pi and no
+   HAT are needed. Start here: [Try it: run the emulator](#try-it-run-the-emulator).
+2. **Build on an x86_64 machine and deploy to a Raspberry Pi.** Your desktop, laptop or a server is the
+   *build machine*: it builds the software and copies it to the Pi over `ssh`. This is the way documented
+   from [Supported hardware](#supported-hardware) onwards.
+3. **Build and run entirely on the Raspberry Pi.** Planned, but not yet documented or tested.
+
+The same apps can also be built as **native images**: programs compiled ahead of time so that they start
+without a Java runtime. That lives in the separate [`pux4j-native`](https://github.com/darranl/pux4j-native)
+project, which builds on the results of this one.
+
+---
+
+## Try it: run the emulator
+
+No hardware needed. The emulator is selected automatically on any machine that is not a Raspberry Pi.
+Mouse press and release stand in for touching the panel.
+
+**You need:** Java 25 (any JDK 25 distribution) and Maven (3.9 and 3.10 tested), on an x86_64 Linux
+machine (tested on Arch Linux). The first build downloads the dependencies from Maven Central, so it
+needs network access and takes a few minutes. Some JavaFX tests are skipped when there is no display,
+and Pi4J logs a "no suitable user group" error line in some tests on a build machine; both are expected.
+
+All commands run from the root of the `pux4j` repository.
+
+```bash
+mvn install                                     # once, and after changing sources
+pux4j-bundle/run-emulator.sh --list           # the apps
+pux4j-bundle/run-emulator.sh demo             # counter app
+pux4j-bundle/run-emulator.sh dice-demo        # dice rolling app
+pux4j-bundle/run-emulator.sh smoke            # raw display smoke test (no bridge)
+pux4j-bundle/run-emulator.sh validation       # interactive display + touch test (mouse = touch)
+```
+
+`mvn install` builds and tests everything and leaves the **emulator bundle**: a directory with all the
+Java libraries (jars) the apps need. The script only runs what the last build left; it never builds. After
+you change sources, build again. To emulate the other panel, or to change the window size, see
+[More on the emulator](#more-on-the-emulator).
+
+---
+
+## Project layout
+
+The `pux4j` repository is a Maven multi-module project, which means one repository holds several modules
+(small libraries and programs) that are built together:
+
+```
+pux4j/
+├── pux4j-core/                 Driver interfaces, service discovery, shared types — no JavaFX
+├── pux4j-driver-hat-2in9v2/    Drivers for the 2.9" V2 HAT (SSD1675A display, ICNT86X touch)
+├── pux4j-driver-hat-2in13v4/   Drivers for the 2.13" V4 HAT (SSD1680 display, GT1151Q touch)
+├── pux4j-transform/            Pixel transformation pipeline — pure Java, no JavaFX, no Pi4J
+├── pux4j-emulator/             JavaFX visual emulator — development and test only
+├── pux4j-fx/                   JavaFX bridge + the SceneContent service interface
+├── pux4j-app-spi/              The DriverApp service interface for non-JavaFX tests
+├── pux4j-launcher/             The pux4j launcher library: runs JavaFX apps and driver tests
+├── pux4j-validation/           Smoke test and interactive hardware validation test
+├── pux4j-demo/                 Counter demo (plain JavaFX app + SceneContent provider)
+├── pux4j-dice-demo/            Dice demo
+├── pux4j-bridge-smoke/         Headless checks that play the demos through the bridge
+└── pux4j-bundle/               Builds the runnable bundles (emulator and Pi); nothing depends on it
+```
+
+How the pieces fit together: `pux4j-core` defines what a display driver and a touch driver are. Each HAT has
+its own driver module (`pux4j-driver-hat-…`) that implements them for that HAT's chips. `pux4j-transform`
+and `pux4j-fx` turn what a JavaFX app draws into frames for the panel, and turn touches back into mouse
+events. `pux4j-launcher` finds and runs the apps. `pux4j-bundle` puts it all together into a **bundle**: a
+directory with the jars, scripts and settings needed to run the apps. Which driver module goes into a
+bundle is chosen when you build (see [Build for a Raspberry Pi](#build-for-a-raspberry-pi)); the emulator
+bundle contains the emulator instead of a HAT driver. More detail on each module is under
+[Architecture](#architecture).
+
+The same apps can also be built as native images, and a native C API is planned; both live in the
+separate `pux4j-native` repository, see its README.
 
 ---
 
 ## Supported hardware
 
+A HAT ("Hardware Attached on Top") is an add-on board that plugs onto the 40-pin header of a Raspberry Pi.
 For each HAT, this table gives the names used by the build, the emulator and the drivers.
 
 | Common name | Panel | Display chip | Touch chip | Tested on | Build profile (`-P`) | Emulator profile |
@@ -28,21 +128,13 @@ For each HAT, this table gives the names used by the build, the emulator and the
   running on a Raspberry Pi; nothing probes which HAT is attached. A bundle contains the drivers
   for exactly one HAT, so build the bundle that matches the HAT on that Pi. A mismatch does not
   produce an error: the panel simply shows nothing sensible.
-- `pux4j --list` ends with a line naming the display and touch drivers in the bundle (for example
-  `Display drivers: png, ssd1675a; touch drivers: icnt86x, programmatic`). That is how you check
-  which HAT a deployed bundle was built for. (`png` and `programmatic` are test drivers that are
-  always present.)
 
 ---
 
-## What you need
+## What you need for a Raspberry Pi
 
-**On the build machine (where you build):** Java 25 (any JDK 25 distribution) and Maven (3.9 and 3.10
-tested). The first build downloads the dependencies, including the aarch64 JavaFX jars used for
-Pi bundles, from Maven Central, so it needs network access and takes a few minutes. The build and
-these instructions are tested on Arch Linux, x86_64. Some JavaFX tests are skipped when there is
-no display, and Pi4J logs a "no suitable user group" error line in some tests on a build machine; both are
-expected.
+**On the build machine (where you build):** what you need for the emulator (Java 25 and Maven), plus
+`ssh` access to the Pi (key-based login is easiest).
 
 **On each Raspberry Pi (where you run):**
 
@@ -63,22 +155,27 @@ expected.
    even though nothing is shown on it. Raspberry Pi OS with the desktop has one by default (a
    monitor does not need to be attached). The `smoke` and `validation` tests do not need it. See
    [DISPLAY](#display-and-the-desktop-session).
-4. **`ssh` access** from the build machine (key-based login is easiest), and `tar` on the Pi (a standard
-   part of Raspberry Pi OS).
+4. **`tar`** on the Pi (a standard part of Raspberry Pi OS).
 
 You do not need `~/bin` on the Pi's `PATH`. If it is not, call `~/bin/pux4j` or the full path
 that the deploy script prints.
 
 ---
 
-## Build
+## Build for a Raspberry Pi
+
+A Maven **profile** is a named switch for the build, chosen with `-P`. The profiles in this project decide
+which HAT the build is made for: the `bundle-hat-<hat>` profile adds that HAT's driver module (and the
+aarch64 JavaFX libraries the Pi needs) to the bundle. A build without one of these profiles, such as
+`mvn install`, produces the emulator bundle, which has no hardware driver. A bundle holds the drivers for
+exactly one HAT, and nothing detects the HAT when the app runs, so build the profile that matches the HAT on
+the Pi (the names are in [Supported hardware](#supported-hardware)).
 
 All commands run from the root of the `pux4j` repository.
 
 ```bash
-mvn install                                   # builds and tests everything; leaves the emulator bundle
-mvn package -DskipTests -Pbundle-hat-2in9v2   # Pi bundle for the 2.9" V2 HAT
-mvn package -DskipTests -Pbundle-hat-2in13v4  # Pi bundle for the 2.13" V4 HAT
+mvn package -DskipTests -Pbundle-hat-2in9v2   # Pi bundle for the 2.9" V2 HAT  (driver module pux4j-driver-hat-2in9v2)
+mvn package -DskipTests -Pbundle-hat-2in13v4  # Pi bundle for the 2.13" V4 HAT (driver module pux4j-driver-hat-2in13v4)
 ```
 
 A Pi bundle is the directory `pux4j-bundle/target/pux4j/`. It is rebuilt from scratch each time,
@@ -87,54 +184,6 @@ so building the other HAT's bundle replaces it. Build, deploy, then build the ot
 Nothing else runs a build for you: the run and deploy scripts only run and copy what the last
 build produced. After you change sources, build again. The emulator bundle (`mvn install`) and a
 Pi bundle (`-Pbundle-hat-...`) are separate outputs; building one does not refresh the other.
-
----
-
-## Run on the build machine (emulator)
-
-No hardware needed. The emulator is selected automatically on any machine that is not a Raspberry Pi.
-
-```bash
-mvn install                                     # once, and after changing sources
-pux4j-bundle/run-emulator.sh --list           # the apps
-pux4j-bundle/run-emulator.sh demo             # counter app
-pux4j-bundle/run-emulator.sh dice-demo        # dice rolling app
-pux4j-bundle/run-emulator.sh smoke            # raw display smoke test (no bridge)
-pux4j-bundle/run-emulator.sh validation       # interactive display + touch test (mouse = touch)
-```
-
-### Emulating different hardware
-
-| Option | Values | Default | Meaning |
-|---|---|---|---|
-| `-Dpux4j.emulator.display=<profile>` | `ssd1675a`, `ssd1680` | `ssd1675a` | The panel to emulate; the profile names are in the [hardware table](#supported-hardware) |
-| `-Dpux4j.emulator.scale=<n>` | a positive integer | `3` | Window size: each panel pixel is drawn as n×n screen pixels |
-
-```bash
-pux4j-bundle/run-emulator.sh demo -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4   # 2.13" panel, 4x
-```
-
-Each profile fixes the panel's size, its mounting orientation and the pixel formats it supports,
-so the emulated window matches the real HAT: the 2.9" profile has 4-gray, the 2.13" profile is
-monochrome only.
-
-What the emulator does not do:
-
-- **Only these two panels exist.** There is no option for another size. A new panel needs a new
-  entry in the emulator's profile list in `pux4j-emulator`.
-- **It does not model refresh time.** The roughly 3-second 4-gray refresh and ghosting of the real
-  panel are not simulated; check those on hardware.
-- **Touch is a straight mapping** from mouse position to panel coordinates, so the emulator cannot
-  catch a wrong touch calibration on a real HAT. Use `validation` on the hardware for that.
-
-Headless checks that play the demos on both panel sizes and write PNG frames, with no window:
-
-```bash
-pux4j-bridge-smoke/run-demo-check.sh
-pux4j-bridge-smoke/run-dice-check.sh
-```
-
-See [`docs/bridge-demo-verification.md`](docs/bridge-demo-verification.md) for what to look for.
 
 ---
 
@@ -173,6 +222,14 @@ pux4j validation            # interactive 10-step display + touch test, no deskt
 
 If `~/bin` is not on your `PATH` (on a fresh Pi it may only be added at your next login, after
 the directory exists), use `~/bin/pux4j` or `~/applications/pux4j/bin/pux4j`.
+
+### Which HAT is this bundle for?
+
+`pux4j --list` ends with a line naming the display and touch drivers in the bundle (for example
+`Display drivers: png, ssd1675a; touch drivers: icnt86x, programmatic`). That is how you check which HAT a
+deployed bundle was built for. (`png` and `programmatic` are test drivers that are always present.)
+
+### The validation test and command-line options
 
 **The validation test** asks you to tap targets on the panel and checks that the touch coordinates
 line up with what is drawn and that the display is the right way up. It writes
@@ -228,6 +285,48 @@ java.lang.UnsupportedOperationException: Unable to open DISPLAY
 
 ---
 
+## More on the emulator
+
+The emulator is the quickest way to try `pux4j` (see [Try it: run the emulator](#try-it-run-the-emulator)).
+This section covers emulating the other panel, and what the emulator does not do.
+
+### Emulating different hardware
+
+| Option | Values | Default | Meaning |
+|---|---|---|---|
+| `-Dpux4j.emulator.display=<profile>` | `ssd1675a`, `ssd1680` | `ssd1675a` | The panel to emulate; the profile names are in the [hardware table](#supported-hardware) |
+| `-Dpux4j.emulator.scale=<n>` | a positive integer | `3` | Window size: each panel pixel is drawn as n×n screen pixels |
+
+```bash
+pux4j-bundle/run-emulator.sh demo -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4   # 2.13" panel, 4x
+```
+
+Each profile fixes the panel's size, its mounting orientation and the pixel formats it supports,
+so the emulated window matches the real HAT: the 2.9" profile has 4-gray, the 2.13" profile is
+monochrome only.
+
+What the emulator does not do:
+
+- **Only these two panels exist.** There is no option for another size. A new panel needs a new
+  entry in the emulator's profile list in `pux4j-emulator`.
+- **It does not model refresh time.** The roughly 3-second 4-gray refresh and ghosting of the real
+  panel are not simulated; check those on hardware.
+- **Touch is a straight mapping** from mouse position to panel coordinates, so the emulator cannot
+  catch a wrong touch calibration on a real HAT. Use `validation` on the hardware for that.
+
+### Headless checks
+
+Headless checks play the demos on both panel sizes and write PNG frames, with no window:
+
+```bash
+pux4j-bridge-smoke/run-demo-check.sh
+pux4j-bridge-smoke/run-dice-check.sh
+```
+
+See [`docs/bridge-demo-verification.md`](docs/bridge-demo-verification.md) for what to look for.
+
+---
+
 ## Build and review Javadoc
 
 `pux4j-core` includes a dedicated Maven profile for Javadoc generation.
@@ -239,38 +338,10 @@ xdg-open pux4j-core/target/reports/apidocs/index.html
 
 ---
 
-## Mascot
-
-**Pux** is a sprite, inspired by Puck from *A Midsummer Night's Dream*. A sprite is both a
-mythological mischief-maker and a computing term for a rendered screen element; Puck causes
-things to appear and transform, which is what this framework does to a JavaFX scene on
-embedded hardware.
-
----
-
 ## Architecture
 
-The `pux4j` repository is a Maven multi-module project:
-
-```
-pux4j/
-├── pux4j-core/                 Driver interfaces, service discovery, shared types — no JavaFX
-├── pux4j-driver-hat-2in9v2/    Drivers for the 2.9" V2 HAT (SSD1675A display, ICNT86X touch)
-├── pux4j-driver-hat-2in13v4/   Drivers for the 2.13" V4 HAT (SSD1680 display, GT1151Q touch)
-├── pux4j-transform/            Pixel transformation pipeline — pure Java, no JavaFX, no Pi4J
-├── pux4j-emulator/             JavaFX visual emulator — development and test only
-├── pux4j-fx/                   JavaFX bridge + the SceneContent service interface
-├── pux4j-app-spi/              The DriverApp service interface for non-JavaFX tests
-├── pux4j-launcher/             The pux4j launcher library: runs JavaFX apps and driver tests
-├── pux4j-validation/           Smoke test and interactive hardware validation test
-├── pux4j-demo/                 Counter demo (plain JavaFX app + SceneContent provider)
-├── pux4j-dice-demo/            Dice demo
-├── pux4j-bridge-smoke/         Headless checks that play the demos through the bridge
-└── pux4j-bundle/               Builds the runnable bundles (emulator and Pi); nothing depends on it
-```
-
-The same apps can also be built as native images, and a native C API is planned; both live in the
-separate `pux4j-native` repository, see its README.
+The modules and how they fit together are described under [Project layout](#project-layout). This section
+adds detail on the main ones.
 
 ### `pux4j-core` and the driver modules
 
@@ -343,6 +414,15 @@ Working today: the drivers for both HATs, the emulator, the JavaFX bridge, the l
 
 Not available yet: published Maven artifacts, a continuous-integration build, and the native C
 API. Building on the Pi itself is not documented yet.
+
+---
+
+## Mascot
+
+**Pux** is a sprite, inspired by Puck from *A Midsummer Night's Dream*. A sprite is both a
+mythological mischief-maker and a computing term for a rendered screen element; Puck causes
+things to appear and transform, which is what this framework does to a JavaFX scene on
+embedded hardware.
 
 ---
 
