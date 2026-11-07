@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Deploy the pux4j bundle to a Raspberry Pi.
 #
-# The script does not build anything. Build the bundle for your HAT first, from pux4j-ui/:
+# The script does not build anything. Build the bundle for your HAT first, from the repository root:
 #     mvn package -Pbundle-hat-2in9v2       # 2.9" V2 HAT
 #     mvn package -Pbundle-hat-2in13v4      # 2.13" V4 HAT
 # which leaves pux4j-launcher/target/pux4j/. This script copies that directory to the Pi
@@ -57,7 +57,7 @@ log() { echo "[deploy] $*"; }
 # --- the bundle must have been built ---------------------------------------
 if [[ ! -d "$BUNDLE/lib" || ! -f "$BUNDLE/bin/pux4j" || ! -f "$BUNDLE/bin/install.sh" ]]; then
     echo "ERROR: the bundle is not built: $BUNDLE" >&2
-    echo "       Build it first, from pux4j-ui/, for the HAT on the Pi:" >&2
+    echo "       Build it first, from the repository root, for the HAT on the Pi:" >&2
     echo "           mvn package -Pbundle-hat-2in9v2     (2.9\" V2 HAT)" >&2
     echo "           mvn package -Pbundle-hat-2in13v4    (2.13\" V4 HAT)" >&2
     exit 2

@@ -4,209 +4,108 @@ Interactive and scripted validation tools for pux4j hardware driver bring-up.
 
 ## What is in this module
 
-- DisplaySmokeTest: quick display-only smoke test for frame write and full refresh.
-- HardwareValidationTest: interactive 10-step display + touch validation flow.
+- `DisplaySmokeTest`: quick display-only smoke test for frame write and full refresh.
+- `HardwareValidationTest`: interactive 10-step display + touch validation flow.
 
-Both tools run via JPMS and ServiceLoader driver factories from pux4j-core.
+Both test the raw drivers directly, without the JavaFX bridge, through the `ServiceLoader` driver
+factories from `pux4j-core`. They are deliberately not JavaFX apps. The launcher lists them as
+`smoke` and `validation` (the thin `DriverApp` wrappers `SmokeDriverApp` and `ValidationDriverApp`
+register them), and their static `main` methods are unchanged, so native images can call them
+directly.
 
 Icon attribution and previews are documented in [src/main/resources/icons/ATTRIBUTION.md](src/main/resources/icons/ATTRIBUTION.md).
 
-## Modes
+## Running them
 
-### Hardware mode (on a Raspberry Pi)
+Build first (from the repository root, `mvn install`; for a Pi `mvn package -Pbundle-hat-...`, see
+the [main README](../README.md)). The tests are run through the launcher.
 
-Run against a physically attached WaveShare eInk HAT. Requires SPI and I2C enabled.
-
-### Emulator mode (laptop, no hardware)
-
-Run against the JavaFX visual emulator. Mouse press = touch down, mouse release = touch up.
-Auto-selects the emulator driver on any machine that is not a Raspberry Pi.
+**On a laptop** (against the JavaFX emulator; mouse press = touch down, release = touch up):
 
 ```bash
-# Smoke test against emulator (SSD1675A profile, 3× scale)
-./pux4j-validation/run-smoke-emulator.sh
-
-# Smoke test with 2.13" V4 profile
-./pux4j-validation/run-smoke-emulator.sh --display=ssd1680
-
-# Interactive validation against emulator
-./pux4j-validation/run-validation-emulator.sh
-
-# Validation with larger scale factor
-./pux4j-validation/run-validation-emulator.sh --scale=4
-
-# Jump to a specific step (e.g. step 3)
-./pux4j-validation/run-validation-emulator.sh --start-step 3
+pux4j-launcher/run-emulator.sh smoke
+pux4j-launcher/run-emulator.sh validation
+pux4j-launcher/run-emulator.sh validation -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4
+pux4j-launcher/run-emulator.sh validation --start-step 3
 ```
 
-Display profiles: `ssd1675a` (296×128, 2.9" V2, default) and `ssd1680` (250×122, 2.13" V4).
+The emulator profiles (`ssd1675a`, 296×128, 2.9" V2, the default; `ssd1680`, 250×122, 2.13" V4) are
+described in the [main README](../README.md#emulating-different-hardware).
 
----
+**On a Raspberry Pi** (against the attached HAT; SPI and I2C must be enabled):
+
+```bash
+pux4j smoke
+pux4j validation
+```
+
+Options after the app name go to the test. `-D...` arguments are JVM properties and are handled by
+the launcher.
 
 ## Available tests
 
-### 1) DisplaySmokeTest
+### 1) DisplaySmokeTest (`smoke`)
 
-Purpose:
 - Verifies basic display initialization and visible frame output.
-- Runs three test frames (half/half, stripes, full white).
+- Runs test frames (half/half, stripes, full white).
+- Optional first argument: the display driver name, for example `pux4j smoke ssd1675a`.
+- Use it as the first hardware sanity check, before touch validation.
 
-When to use:
-- First hardware sanity check before touch validation.
+### 2) HardwareValidationTest (`validation`)
 
-Run:
-```bash
-./pux4j-validation/run-smoke-test.sh
-```
+- Full interactive acceptance test for display and touch mapping, using instruction, challenge and
+  feedback phases. It checks that the display is the right way up and that touch coordinates line up
+  with what is drawn.
+- The default run executes the first 2 scenarios; more can be enabled.
+- Writes a report named `validation-report-YYYYMMDD-HHMMSS.txt` into the directory you ran it from.
+- Use it after the smoke test passes, and when checking touch coordinate mapping.
 
-Optional driver override:
-```bash
-./pux4j-validation/run-smoke-test.sh ssd1675a
-```
+Options:
 
-Show script help:
-```bash
-./pux4j-validation/run-smoke-test.sh --help
-```
+| Option | Meaning |
+|---|---|
+| `--start-step <n>` | Jump to step n |
+| `--scenario-count <n>` / `--all-scenarios` | How many scenarios to run |
+| `--notes "text"` | Text recorded in the report |
+| `--display <driver>`, `--touch <driver>` | Choose drivers by name instead of auto-selection |
+| `--orientation <name>` | Explicit orientation, for drivers with no fixed physical orientation (for example `--display png`) |
+| `--dc-pin`, `--rst-pin`, `--busy-pin`, `--touch-rst-pin`, `--touch-int-pin`, `--touch-i2c-address` | Override a pin or the touch I2C address; each is written to the driver configuration only when given |
 
-### 2) HardwareValidationTest
+Any other option is rejected with "Unknown argument".
 
-Purpose:
-- Full interactive acceptance test for display + touch mapping.
-- Uses instruction/challenge/feedback phases.
-- Default run executes the first 2 scenarios for stabilization.
-- Additional scenarios can be enabled incrementally.
-- Writes a validation report file in the working directory:
-  - validation-report-YYYYMMDD-HHMMSS.txt
-
-When to use:
-- After smoke test passes.
-- During touch coordinate mapping calibration.
-
-Run (default profile for Pi 500+ 2.9" V2):
-```bash
-./pux4j-validation/run-hardware-validation.sh
-```
-
-## Hardware profiles (one-command run)
-
-The run script supports profiles so you do not need to pass long argument lists.
-
-Profiles:
-- pi500-2in9 (default):
-  - display=ssd1675a
-  - touch=icnt86x
-- little-2in13:
-  - display=ssd1680
-  - touch=gt1151q
-- custom:
-  - no preset arguments (you pass everything)
-
-Orientation (physical mounting: `LANDSCAPE` vs `LANDSCAPE_INVERTED`) and touch calibration
-(native resolution, axis flips/swap) are not run arguments at all — each display driver
-reports its own fixed physical orientation (see `DisplayDriverFactory.physicalOrientation`)
-and each touch driver reports its own fixed calibration for the panel it's bonded to (see
-`TouchDriverFactory.touchCalibration`), both in `pux4j-core`, so there is nothing to pass or
-get out of sync here. `--orientation` remains available as an explicit override for drivers
-with no fixed physical orientation (e.g. `--display png`) — see the `custom` example below.
-
-Examples:
-```bash
-# Default profile (pi500-2in9)
-./pux4j-validation/run-hardware-validation.sh
-
-# Explicit profile
-./pux4j-validation/run-hardware-validation.sh pi500-2in9
-./pux4j-validation/run-hardware-validation.sh little-2in13
-
-# Add notes to report
-./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --notes "baseline calibration run"
-
-# Run first 4 scenarios
-./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --scenario-count 4
-
-# Run all available scenarios
-./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --all-scenarios
-
-# Fully custom invocation
-./pux4j-validation/run-hardware-validation.sh custom -- \
-  --display ssd1675a \
-  --touch icnt86x \
-  --orientation LANDSCAPE
-```
-
-Show script help:
-```bash
-./pux4j-validation/run-hardware-validation.sh --help
-```
-
-## Setup and first run
-
-From repository root (pux4j-ui):
-
-```bash
-mvn -pl pux4j-validation -am -DskipTests package
-mvn -pl pux4j-validation -DincludeScope=runtime dependency:copy-dependencies -DoutputDirectory=target/run-lib
-```
-
-Then run:
-```bash
-./pux4j-validation/run-hardware-validation.sh
-```
-
-The launcher scripts refresh artifacts automatically when module sources/resources are newer than the built JAR.
-To force refresh manually:
-
-```bash
-FORCE_PREPARE=1 ./pux4j-validation/run-hardware-validation.sh
-FORCE_PREPARE=1 ./pux4j-validation/run-smoke-test.sh
-```
-
-Note:
-- Both run scripts auto-run build/dependency preparation when artifacts are missing.
-- If you prefer to skip this auto-prepare behavior, set SKIP_PREPARE=1.
-- Hardware validation defaults to 2 scenarios for stability; use `--scenario-count` or `--all-scenarios` to expand coverage.
-
-## Native access requirement
-
-Pi4J FFM backend requires native access enabled for module com.pi4j.plugin.ffm.
-Both run scripts already include:
-- --enable-native-access=com.pi4j.plugin.ffm
+Orientation (`LANDSCAPE` vs `LANDSCAPE_INVERTED`) and touch calibration (native resolution, axis
+flips and swap) are not options: each display driver reports its own fixed physical orientation
+(`DisplayDriverFactory.physicalOrientation`) and each touch driver its own fixed calibration for the
+panel it is bonded to (`TouchDriverFactory.touchCalibration`), so there is nothing to pass or to get
+out of sync. Pin and I2C address defaults likewise come from the drivers.
 
 ## Practical workflow
 
-1. Run smoke test.
-2. Run hardware validation with the hardware profile.
-3. If taps miss targets, rerun with custom touch mapping flags.
-4. Keep the generated report as evidence of pass/fail and calibration status.
+1. Run `smoke`.
+2. Run `validation`.
+3. If taps miss their targets, the touch calibration in the HAT's driver module needs attention;
+   keep the generated report as evidence of pass/fail and calibration status.
 
 ## Hardware trace workflow
 
-The driver's SPI command and data writes can be traced live using ByteMan without
-modifying production code. The rules live in
-`pux4j-core/src/main/byteman/hardware-trace.btm`.
+The driver's SPI command and data writes can be traced live with ByteMan without modifying
+production code. The rules are in [`src/main/byteman/`](src/main/byteman) and are shipped in the
+Pi bundle's `byteman/` directory. The ByteMan agent jar itself is not shipped: install ByteMan on
+the Pi and pass the agent through `PUX4J_JAVA_OPTS`:
 
 ```bash
-# Run smoke test with SPI-level trace printed to stdout
-./pux4j-validation/run-hardware-trace.sh
-
-# Filter trace lines only
-./pux4j-validation/run-hardware-trace.sh 2>&1 | grep '\[HW-TRACE\]'
-
-# Capture to file
-./pux4j-validation/run-hardware-trace.sh 2>&1 | tee /tmp/hw-trace.log
-
-# Type-check rules only (no hardware required)
-./pux4j-validation/run-hardware-trace.sh check
+# on the Pi, with BYTEMAN_HOME pointing at a ByteMan installation
+export PUX4J_JAVA_OPTS="-javaagent:$BYTEMAN_HOME/lib/byteman.jar=script:$HOME/applications/pux4j/byteman/hardware-trace.btm"
+pux4j smoke
+pux4j smoke 2>&1 | grep '\[HW-TRACE\]'        # trace lines only
 ```
 
-Each [HW-TRACE] line is one of:
-- `CMD  0xNN (SYMBOLIC_NAME) data[N]=<hex>` — a sendCommand call
-- `DATA len=N preview=<first 16 bytes hex>...` — a sendData call
+Rule files: `hardware-trace.btm` (SPI commands and data), `ioctl-trace.btm` (ioctl-level) and
+`partial-corruption-check.btm`. Several can be combined, comma separated:
+`=script:a.btm,script:b.btm`. Each `[HW-TRACE]` line is one of:
 
-Command bytes are annotated with their symbolic names (e.g. `WRITE_BW_RAM`,
-`WRITE_LUT`, `DISP_UPDATE_2`) via `CmdNames` in the driver package.
+- `CMD  0xNN (SYMBOLIC_NAME) data[N]=<hex>`: a `sendCommand` call
+- `DATA len=N preview=<first 16 bytes hex>...`: a `sendData` call
 
-Default ByteMan install location: `~/development/byteman-download-4.0.26`.
-Override with the `BYTEMAN_HOME` environment variable.
-
+Command bytes are annotated with their symbolic names (for example `WRITE_BW_RAM`, `WRITE_LUT`,
+`DISP_UPDATE_2`).

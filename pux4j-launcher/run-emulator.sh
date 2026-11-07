@@ -12,7 +12,7 @@
 # are JVM properties. Exit codes: 0 success, 1 failure, 2 usage error.
 # Display size/panel: -Dpux4j.display.* (see EInkBridge).
 #
-# This script only runs; it never builds. Build first from pux4j-ui/: mvn install (or mvn package).
+# This script only runs; it never builds. Build first from the repository root: mvn install (or mvn package).
 # After editing sources, build again: the script runs whatever the last build left in target/.
 set -euo pipefail
 
@@ -31,7 +31,7 @@ LIB_DIR="$SCRIPT_DIR/target/run-lib"
 
 if [[ ! -f "$LAUNCHER_JAR" || ! -d "$LIB_DIR" ]]; then
   echo "ERROR: the launcher bundle is not built." >&2
-  echo "       Build it first: cd pux4j-ui && mvn install" >&2
+  echo "       Build it first, from the repository root: mvn install" >&2
   exit 2
 fi
 
