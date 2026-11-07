@@ -14,7 +14,7 @@ package dev.pux4j.ui.core;
  * {@code pux4j-validation} — the landscape mappings are a proper 90-degree rotation (axis
  * swap plus exactly one flip), not a mirror/transpose (axis swap plus zero or two flips),
  * which has the wrong handedness for a physical screen rotation. Direction empirically
- * confirmed on LittleRaspberry (hat-2in13v4, {@code LANDSCAPE_INVERTED}) 2026-08-30: an
+ * confirmed on a Raspberry Pi Zero 2 W with the 2.13" HAT (hat-2in13v4, {@code LANDSCAPE_INVERTED}) 2026-08-30: an
  * earlier transpose-based attempt rendered the correct aspect ratio and right-way-up, but
  * mirrored left-right.
  *

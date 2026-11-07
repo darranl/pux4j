@@ -40,7 +40,7 @@ import java.util.regex.Pattern;
  * (Linux GPIO character-device uAPI, {@code <linux/gpio.h>}).
  *
  * <p>Matches are deduplicated by canonical real device path, not by chip number: some
- * systems register a symlink alias for the header chip (observed on LittleRaspberry, 2026-09
+ * systems register a symlink alias for the header chip (observed on a Raspberry Pi Zero 2 W, 2026-09
  * — {@code /dev/gpiochip4} symlinked to {@code /dev/gpiochip0}, both reporting the identical
  * {@code pinctrl-bcm2835} label) that would otherwise look like a second, distinct header
  * chip and trip the "expected exactly one" check below.
@@ -115,7 +115,7 @@ public final class GpioChipResolver {
         }
         List<Integer> candidates = new ArrayList<>();
         // Keyed by each match's canonical real device path, not by chip number: some
-        // systems register a symlink alias for the header chip (e.g. LittleRaspberry,
+        // systems register a symlink alias for the header chip (e.g. a Raspberry Pi Zero 2 W,
         // 2026-09, /dev/gpiochip4 -> /dev/gpiochip0 — both names report the identical
         // pinctrl-bcm2835 label because they resolve to the exact same physical device).
         // Without this, that alias is wrongly counted as a second, distinct header chip.
