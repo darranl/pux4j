@@ -47,7 +47,7 @@ without JavaFX, so they are useful for checking a new setup.
 
 1. **Try it in the emulator.** On an x86_64 Linux machine with Java 25 and Maven. No Raspberry Pi and no
    HAT are needed. Start here: [Try it: run the emulator](#try-it-run-the-emulator).
-2. **Build on an x86_64 machine and deploy to a Raspberry Pi.** Your desktop, laptop or a server is the
+2. **Build on an x86_64 machine and deploy to a Raspberry Pi.** Any x86_64 Linux computer can be the
    *build machine*: it builds the software and copies it to the Pi over `ssh`. This is the way documented
    from [Supported hardware](#supported-hardware) onwards.
 3. **Build and run entirely on the Raspberry Pi.** Planned, but not yet documented or tested.
