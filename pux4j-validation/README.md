@@ -23,10 +23,10 @@ the [main README](../README.md)). The tests are run through the launcher.
 **On a laptop** (against the JavaFX emulator; mouse press = touch down, release = touch up):
 
 ```bash
-pux4j-launcher/run-emulator.sh smoke
-pux4j-launcher/run-emulator.sh validation
-pux4j-launcher/run-emulator.sh validation -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4
-pux4j-launcher/run-emulator.sh validation --start-step 3
+pux4j-bundle/run-emulator.sh smoke
+pux4j-bundle/run-emulator.sh validation
+pux4j-bundle/run-emulator.sh validation -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4
+pux4j-bundle/run-emulator.sh validation --start-step 3
 ```
 
 The emulator profiles (`ssd1675a`, 296×128, 2.9" V2, the default; `ssd1680`, 250×122, 2.13" V4) are

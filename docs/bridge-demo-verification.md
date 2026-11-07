@@ -38,7 +38,7 @@ Upside-down, mirrored, or `+`/`−` swapped means an orientation bug.
 The headless run proves the logic; this checks a real window with mouse input.
 
 ```bash
-./pux4j-launcher/run-emulator.sh demo -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4
+./pux4j-bundle/run-emulator.sh demo -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4
 ```
 
 Omit the `-Dpux4j.emulator.display` property for the 2.9" profile. A panel-shaped window opens and

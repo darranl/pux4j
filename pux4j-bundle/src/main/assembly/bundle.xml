@@ -3,7 +3,7 @@
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
     xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 https://maven.apache.org/xsd/assembly-2.2.0.xsd">
   <!-- Hardware bundle: a ready-to-copy directory, target/pux4j/, holding lib/, bin/, conf/ and
-       byteman/. Active only in the bundle-hat-* profiles. -->
+       byteman/. Active only in the bundle-hat-* profiles. The launcher jar arrives as an ordinary dependency. -->
   <id>bundle</id>
   <formats>
     <format>dir</format>
@@ -14,7 +14,7 @@
     <dependencySet>
       <outputDirectory>lib</outputDirectory>
       <scope>runtime</scope>
-      <useProjectArtifact>true</useProjectArtifact>
+      <useProjectArtifact>false</useProjectArtifact>
       <outputFileNameMapping>${artifact.artifactId}-${artifact.baseVersion}${dashClassifier?}.${artifact.extension}</outputFileNameMapping>
       <fileMode>0644</fileMode>
     </dependencySet>

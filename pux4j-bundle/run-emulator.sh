@@ -26,19 +26,16 @@ for arg in "$@"; do
 done
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-LAUNCHER_JAR=""
-for jar in "$SCRIPT_DIR"/target/pux4j-launcher-*.jar; do
-  case "$jar" in *-sources.jar|*-javadoc.jar|*-tests.jar) ;; *) LAUNCHER_JAR="$jar" ;; esac
-done
 LIB_DIR="$SCRIPT_DIR/target/run-lib"
 
-if [[ ! -f "$LAUNCHER_JAR" || ! -d "$LIB_DIR" ]]; then
+# run-lib holds every runtime jar of the bundle, the launcher's included.
+if ! compgen -G "$LIB_DIR/pux4j-launcher-*.jar" >/dev/null; then
   echo "ERROR: the launcher bundle is not built." >&2
   echo "       Build it first, from the repository root: mvn install" >&2
   exit 2
 fi
 
-MODULE_PATH="$LAUNCHER_JAR:$(ls "$LIB_DIR"/*.jar | tr '\n' ':')"
+MODULE_PATH=$(ls "$LIB_DIR"/*.jar | tr '\n' ':')
 
 JVM_ARGS=()   # -D options
 APP_ARGS=()   # app name, its arguments, --list (anything not -D*, passed through unchanged)

@@ -22,7 +22,7 @@ REPO="$WORK/repo"; PIHOME="$WORK/pihome"; FAKEBIN="$WORK/fakebin"
 mkdir -p "$REPO/scripts" "$PIHOME" "$FAKEBIN"
 cp "$SRC_SCRIPT" "$REPO/scripts/deploy.sh"
 make_bundle() { # $1 = number of HAT jars
-    local b="$REPO/pux4j-launcher/target/pux4j"
+    local b="$REPO/pux4j-bundle/target/pux4j"
     rm -rf "$b"; mkdir -p "$b/lib" "$b/bin" "$b/conf" "$b/byteman"
     echo jar > "$b/lib/pux4j-core-0.1.0-SNAPSHOT.jar"
     [ "$1" -ge 1 ] && echo jar > "$b/lib/pux4j-driver-hat-2in9v2-0.1.0-SNAPSHOT.jar"

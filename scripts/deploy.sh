@@ -4,7 +4,7 @@
 # The script does not build anything. Build the bundle for your HAT first, from the repository root:
 #     mvn package -DskipTests -Pbundle-hat-2in9v2       # 2.9" V2 HAT
 #     mvn package -DskipTests -Pbundle-hat-2in13v4      # 2.13" V4 HAT
-# which leaves pux4j-launcher/target/pux4j/. This script copies that directory to the Pi
+# which leaves pux4j-bundle/target/pux4j/. This script copies that directory to the Pi
 # and runs its bin/install.sh there. The bundle carries one HAT's drivers; deploy the
 # bundle that matches the HAT on that Pi (the script prints which one it is).
 #
@@ -30,7 +30,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUNDLE="$(cd "$SCRIPT_DIR/.." && pwd)/pux4j-launcher/target/pux4j"
+BUNDLE="$(cd "$SCRIPT_DIR/.." && pwd)/pux4j-bundle/target/pux4j"
 
 TARGET_USER=""
 PARENT_DIR="applications"

@@ -2,7 +2,7 @@
 # Tests of the bundle scripts bin/pux4j and bin/install.sh. Needs only bash and coreutils; no
 # Java, no device: a fake `java` placed first on PATH stands in for the JVM.
 #
-# Run from the repository root:   pux4j-launcher/src/test/scripts/bundle-scripts-test.sh
+# Run from the repository root:   pux4j-bundle/src/test/scripts/bundle-scripts-test.sh
 # Creates (and removes) its scratch directories under ${TMPDIR:-$HOME/tmp/pux4j}.
 set -uo pipefail
 

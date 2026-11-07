@@ -83,7 +83,7 @@ mvn package -DskipTests -Pbundle-hat-2in9v2   # Pi bundle for the 2.9" V2 HAT
 mvn package -DskipTests -Pbundle-hat-2in13v4  # Pi bundle for the 2.13" V4 HAT
 ```
 
-A Pi bundle is the directory `pux4j-launcher/target/pux4j/`. It is rebuilt from scratch each time,
+A Pi bundle is the directory `pux4j-bundle/target/pux4j/`. It is rebuilt from scratch each time,
 so building the other HAT's bundle replaces it. Build, deploy, then build the other.
 
 Nothing else runs a build for you: the run and deploy scripts only run and copy what the last
@@ -98,11 +98,11 @@ No hardware needed. The emulator is selected automatically on any machine that i
 
 ```bash
 mvn install                                     # once, and after changing sources
-pux4j-launcher/run-emulator.sh --list           # the apps
-pux4j-launcher/run-emulator.sh demo             # counter app
-pux4j-launcher/run-emulator.sh dice-demo        # dice rolling app
-pux4j-launcher/run-emulator.sh smoke            # raw display smoke test (no bridge)
-pux4j-launcher/run-emulator.sh validation       # interactive display + touch test (mouse = touch)
+pux4j-bundle/run-emulator.sh --list           # the apps
+pux4j-bundle/run-emulator.sh demo             # counter app
+pux4j-bundle/run-emulator.sh dice-demo        # dice rolling app
+pux4j-bundle/run-emulator.sh smoke            # raw display smoke test (no bridge)
+pux4j-bundle/run-emulator.sh validation       # interactive display + touch test (mouse = touch)
 ```
 
 ### Emulating different hardware
@@ -113,7 +113,7 @@ pux4j-launcher/run-emulator.sh validation       # interactive display + touch te
 | `-Dpux4j.emulator.scale=<n>` | a positive integer | `3` | Window size: each panel pixel is drawn as n×n screen pixels |
 
 ```bash
-pux4j-launcher/run-emulator.sh demo -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4   # 2.13" panel, 4x
+pux4j-bundle/run-emulator.sh demo -Dpux4j.emulator.display=ssd1680 -Dpux4j.emulator.scale=4   # 2.13" panel, 4x
 ```
 
 Each profile fixes the panel's size, its mounting orientation and the pixel formats it supports,
@@ -263,11 +263,12 @@ pux4j/
 ├── pux4j-emulator/             JavaFX visual emulator — development and test only
 ├── pux4j-fx/                   JavaFX bridge + the SceneContent service interface
 ├── pux4j-app-spi/              The DriverApp service interface for non-JavaFX tests
-├── pux4j-launcher/             The pux4j launcher: runs JavaFX apps and driver tests; builds the bundles
+├── pux4j-launcher/             The pux4j launcher library: runs JavaFX apps and driver tests
 ├── pux4j-validation/           Smoke test and interactive hardware validation test
 ├── pux4j-demo/                 Counter demo (plain JavaFX app + SceneContent provider)
 ├── pux4j-dice-demo/            Dice demo
-└── pux4j-bridge-smoke/         Headless checks that play the demos through the bridge
+├── pux4j-bridge-smoke/         Headless checks that play the demos through the bridge
+└── pux4j-bundle/               Builds the runnable bundles (emulator and Pi); nothing depends on it
 ```
 
 GraalVM native images and the planned native C API live in the separate `pux4j-native`
@@ -295,7 +296,12 @@ The JavaFX bridge. It watches the scene graph with a pulse-driven `AnimationTime
 through `pux4j-transform`, pushes updates to the display on a dedicated virtual thread, and turns
 hardware touch contacts back into JavaFX `MouseEvent`s.
 
-### `pux4j-launcher` and the two kinds of app
+### `pux4j-launcher`, `pux4j-bundle` and the two kinds of app
+
+`pux4j-launcher` is a plain library, so an outside application can depend on it without pulling in
+any demo, emulator or driver. `pux4j-bundle` is the module that builds the runnable bundles from it
+(the emulator bundle in `target/run-lib`, a Pi bundle per HAT profile in `target/pux4j`), together
+with the `pux4j` and `install.sh` scripts and `run-emulator.sh`; no module depends on it.
 
 The launcher (`pux4j` on a Pi, `run-emulator.sh` on a laptop) lists and runs two kinds of app in
 one name space:

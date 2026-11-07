@@ -33,6 +33,7 @@
         <module>pux4j-validation</module>
         <module>pux4j-demo</module>
         <module>pux4j-dice-demo</module>
+        <module>pux4j-bundle</module>
     </modules>
 
     <properties>
@@ -105,7 +106,7 @@
             </properties>
         </profile>
 
-        <!-- Hardware bundle profiles (the bundle itself is assembled in pux4j-launcher). The ids
+        <!-- Hardware bundle profiles (the bundle itself is assembled in pux4j-bundle). The ids
              repeat there on purpose: -P activates every profile with the id, so here they only
              pin the JavaFX classifier to aarch64 for the whole reactor. They must stay AFTER the
              OS profiles above: when several active profiles set the same property the one
