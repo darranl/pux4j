@@ -33,6 +33,9 @@ screens at its smaller size.
 `smoke` and `validation` are **driver tests**: they talk to the display and touch hardware directly,
 without JavaFX, so they are useful for checking a new setup.
 
+The two JavaFX apps can also be run as plain desktop programs, without `pux4j`'s display support:
+see [Run the JavaFX apps directly](#run-the-javafx-apps-directly).
+
 ---
 
 ## Ways of working
@@ -395,6 +398,40 @@ fully qualified class name if those clash too); `--list` shows the original name
 
 A JavaFX window that emulates a panel for development without hardware; mouse events feed the touch
 pipeline. See [Emulating different hardware](#emulating-different-hardware).
+
+---
+
+## Run the JavaFX apps directly
+
+`demo` and `dice-demo` are ordinary JavaFX programs, and each module also contains a plain desktop window for
+it that does not use `pux4j` at all: `DemoApp` in `pux4j-demo` and `DiceDemoApp` in `pux4j-dice-demo`. They
+open a normal JavaFX window laid out for the 296×128 panel, with no emulator, no drivers and no launcher.
+That makes them handy for working on an app's layout and behaviour like any other JavaFX program, before
+trying it on the emulator or a panel.
+
+Build first (`mvn install`, as in [Try it: run the emulator](#try-it-run-the-emulator)), then run from the
+root of the `pux4j` repository:
+
+```bash
+java --module-path pux4j-bundle/target/run-lib --enable-native-access=javafx.graphics \
+     -m dev.pux4j.ui.demo/dev.pux4j.ui.demo.DemoApp                    # counter app
+java --module-path pux4j-bundle/target/run-lib --enable-native-access=javafx.graphics \
+     -m dev.pux4j.ui.dice.demo/dev.pux4j.ui.dice.demo.DiceDemoApp      # dice rolling app
+```
+
+`pux4j-bundle/target/run-lib` is the directory of jars that `mvn install` leaves for the emulator bundle;
+it holds everything these two programs need. Options go at the end of the command:
+
+| Option | Meaning |
+|---|---|
+| `--scale=<n>` | Zoom the window; the default is `3`, and `1` is pixel-exact |
+| `--no-bezel` | Drop the black frame drawn around the display area (`--bezel` puts it back; it is on by default) |
+
+The window has no title bar. Drag it with the mouse, and right-click it for an **Exit** menu. JavaFX may
+print `sun.misc.Unsafe` warnings when it starts; they do not affect the app.
+
+There is no script for this yet; to see the apps on the emulator or a panel instead, use `run-emulator.sh`
+or `pux4j` as described above.
 
 ---
 
