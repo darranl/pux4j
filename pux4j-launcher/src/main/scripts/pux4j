@@ -2,10 +2,16 @@
 # Run a pux4j app on the attached e-paper display (JVM).
 #
 # Usage:
-#   pux4j [<app>] [-D<pux4j property>=<value> ...]
+#   pux4j <app> [<app args> ...] [-D<pux4j property>=<value> ...]
 #   pux4j --list
 #
-# <app> is optional while only one app is installed. Logs to ~/tmp/run-log.txt as well as the
+# Two kinds of app share one name space (--list shows each with its kind):
+#   JavaFX app   run through the eInk bridge; extra arguments are ignored.
+#   driver test  a non-JavaFX test of the raw drivers (e.g. smoke, validation); everything after
+#                the name is passed to it unchanged, e.g.  pux4j validation --start-step 3
+# Only options starting with -D are JVM system properties; every other argument goes to the
+# launcher. <app> is optional while only one app is installed. Exit codes: 0 success,
+# 1 failure, 2 usage error (unknown or missing app). Logs to ~/tmp/run-log.txt as well as the
 # terminal. JavaFX needs a display session even though nothing is shown on it; DISPLAY
 # defaults to :0 (override by exporting it first).
 set -euo pipefail
@@ -24,7 +30,7 @@ case "${1:-}" in
 esac
 
 JVM_ARGS=()   # -D options
-APP_ARGS=()   # app name, --list
+APP_ARGS=()   # app name, its arguments, --list (anything not -D*, passed through unchanged)
 for arg in "$@"; do
   case "$arg" in
     -D*) JVM_ARGS+=("$arg") ;;

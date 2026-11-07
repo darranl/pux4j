@@ -13,12 +13,17 @@
     <artifactId>pux4j-launcher</artifactId>
     <name>pux4j :: Launcher</name>
     <description>
-        Generic launcher that runs any SceneContent app on an EInkBridge. Contains no
+        Generic launcher that runs any SceneContent app on an EInkBridge, or any non-JavaFX
+        DriverApp (such as the hardware tests) directly. Contains no
         application code and no driver choice: the application and the drivers (emulator or a
         HAT) are whatever is on the module path, so a bundle is just a dependency set.
     </description>
 
     <dependencies>
+        <dependency>
+            <groupId>dev.pux4j.ui</groupId>
+            <artifactId>pux4j-app-spi</artifactId>
+        </dependency>
         <dependency>
             <groupId>dev.pux4j.ui</groupId>
             <artifactId>pux4j-core</artifactId>
@@ -71,6 +76,11 @@
                 </dependency>
                 <dependency>
                     <groupId>dev.pux4j.ui</groupId>
+                    <artifactId>pux4j-validation</artifactId>
+                    <version>${project.version}</version>
+                </dependency>
+                <dependency>
+                    <groupId>dev.pux4j.ui</groupId>
                     <artifactId>pux4j-demo</artifactId>
                     <version>${project.version}</version>
                 </dependency>
@@ -81,9 +91,9 @@
                 </dependency>
             </dependencies>
         </profile>
-        <!-- Hardware bundle for LittleRaspberry: launcher + the demo apps + the 2.13" V4 HAT drivers
+        <!-- Hardware bundle for the 2.13" V4 HAT: launcher + the apps + the HAT drivers
              (SSD1680 + GT1151Q) in place of the emulator. Built with the aarch64 JavaFX
-             classifier (-Djavafx.platform=linux-aarch64); used by scripts/deploy-eink.sh. -->
+             classifier (-Djavafx.platform=linux-aarch64); built by the deploy script. -->
         <profile>
             <id>bundle-hat-2in13v4</id>
             <dependencies>
@@ -94,6 +104,17 @@
                 </dependency>
                 <dependency>
                     <groupId>dev.pux4j.ui</groupId>
+                    <artifactId>pux4j-validation</artifactId>
+                    <version>${project.version}</version>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>dev.pux4j.ui</groupId>
+                            <artifactId>pux4j-emulator</artifactId>
+                        </exclusion>
+                    </exclusions>
+                </dependency>
+                <dependency>
+                    <groupId>dev.pux4j.ui</groupId>
                     <artifactId>pux4j-demo</artifactId>
                     <version>${project.version}</version>
                 </dependency>
@@ -104,9 +125,9 @@
                 </dependency>
             </dependencies>
         </profile>
-        <!-- Hardware bundle for diamondpi: launcher + the demo apps + the 2.9" V2 HAT drivers
+        <!-- Hardware bundle for the 2.9" V2 HAT: launcher + the apps + the HAT drivers
              (SSD1675A + ICNT86X) in place of the emulator. Built with the aarch64 JavaFX
-             classifier (-Djavafx.platform=linux-aarch64); used by scripts/deploy-eink.sh with the 2in9v2 HAT option. -->
+             classifier (-Djavafx.platform=linux-aarch64); built by the deploy script with the 2in9v2 HAT option. -->
         <profile>
             <id>bundle-hat-2in9v2</id>
             <dependencies>
@@ -114,6 +135,17 @@
                     <groupId>dev.pux4j.ui</groupId>
                     <artifactId>pux4j-driver-hat-2in9v2</artifactId>
                     <version>${project.version}</version>
+                </dependency>
+                <dependency>
+                    <groupId>dev.pux4j.ui</groupId>
+                    <artifactId>pux4j-validation</artifactId>
+                    <version>${project.version}</version>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>dev.pux4j.ui</groupId>
+                            <artifactId>pux4j-emulator</artifactId>
+                        </exclusion>
+                    </exclusions>
                 </dependency>
                 <dependency>
                     <groupId>dev.pux4j.ui</groupId>

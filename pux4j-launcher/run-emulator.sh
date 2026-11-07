@@ -2,11 +2,15 @@
 # Run a pux4j demo on the desktop emulator through EInkBridge (drivers are auto-selected).
 #
 # Usage:
-#   ./run-emulator.sh [<app>] [-D<pux4j property>=<value> ...]
+#   ./run-emulator.sh <app> [<app args> ...] [-D<pux4j property>=<value> ...]
 #   ./run-emulator.sh --list
 #
-# Apps: "demo" (the counter) and "dice-demo"; <app> is required while more than one
-# SceneContent is on the module path (--list shows them). Display size/panel: -Dpux4j.display.* (see EInkBridge).
+# Two kinds of app share one name space: JavaFX apps ("demo", the counter, and "dice-demo"; run
+# through EInkBridge, extra arguments ignored) and non-JavaFX driver tests ("smoke",
+# "validation"; everything after the name is passed to them unchanged). <app> is required while
+# more than one app is on the module path; --list shows them with their kind. Only -D* options
+# are JVM properties. Exit codes: 0 success, 1 failure, 2 usage error.
+# Display size/panel: -Dpux4j.display.* (see EInkBridge).
 #
 # Environment:
 #   SKIP_PREPARE=1    Skip auto-build/dependency preparation checks
@@ -45,7 +49,7 @@ fi
 MODULE_PATH="$LAUNCHER_JAR:$(ls "$LIB_DIR"/*.jar | tr '\n' ':')"
 
 JVM_ARGS=()   # -D options
-APP_ARGS=()   # app name, --list
+APP_ARGS=()   # app name, its arguments, --list (anything not -D*, passed through unchanged)
 for arg in "$@"; do
   case "$arg" in
     -D*) JVM_ARGS+=("$arg") ;;

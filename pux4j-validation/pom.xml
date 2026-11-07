@@ -17,6 +17,10 @@
     <dependencies>
         <dependency>
             <groupId>dev.pux4j.ui</groupId>
+            <artifactId>pux4j-app-spi</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.pux4j.ui</groupId>
             <artifactId>pux4j-core</artifactId>
         </dependency>
         <dependency>
@@ -48,14 +52,6 @@
         <dependency>
             <groupId>org.eclipse.parsson</groupId>
             <artifactId>parsson</artifactId>
-            <scope>runtime</scope>
-        </dependency>
-        <!-- Emulator: runtime scope so it lands in target/run-lib automatically.
-             Excluded from hardware distribution assemblies (see dist.xml). -->
-        <dependency>
-            <groupId>dev.pux4j.ui</groupId>
-            <artifactId>pux4j-emulator</artifactId>
-            <version>${project.version}</version>
             <scope>runtime</scope>
         </dependency>
         <dependency>
@@ -92,6 +88,32 @@
     </build>
 
     <profiles>
+        <!-- Emulator: runtime scope so it lands in target/run-lib automatically. Active by
+             default; Maven turns an activeByDefault profile off when any other profile of this
+             pom is activated, so the hardware profiles below (dist-* and the launcher's bundle
+             profile ids, repeated here as empty profiles) leave the emulator out. That keeps it
+             out of a hardware bundle even when a reactor-wide dependency:copy-dependencies
+             visits this module. -->
+        <profile>
+            <id>emulator</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>dev.pux4j.ui</groupId>
+                    <artifactId>pux4j-emulator</artifactId>
+                    <version>${project.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>bundle-hat-2in13v4</id>
+        </profile>
+        <profile>
+            <id>bundle-hat-2in9v2</id>
+        </profile>
         <profile>
             <id>dist-hat-2in13v4</id>
             <properties>

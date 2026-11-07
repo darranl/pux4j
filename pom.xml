@@ -21,6 +21,7 @@
     </licenses>
 
     <modules>
+        <module>pux4j-app-spi</module>
         <module>pux4j-core</module>
         <module>pux4j-driver-hat-2in13v4</module>
         <module>pux4j-driver-hat-2in9v2</module>
@@ -108,6 +109,11 @@
     <dependencyManagement>
         <dependencies>
             <!-- Internal modules -->
+            <dependency>
+                <groupId>dev.pux4j.ui</groupId>
+                <artifactId>pux4j-app-spi</artifactId>
+                <version>${project.version}</version>
+            </dependency>
             <dependency>
                 <groupId>dev.pux4j.ui</groupId>
                 <artifactId>pux4j-core</artifactId>

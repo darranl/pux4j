@@ -1,29 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.pux4j.ui.launcher;
 
-import dev.pux4j.ui.fx.EInkBridge;
+import dev.pux4j.ui.app.DriverApp;
+import dev.pux4j.ui.core.DisplayDriverFactory;
+import dev.pux4j.ui.core.TouchDriverFactory;
 import dev.pux4j.ui.fx.SceneContent;
-import javafx.application.Platform;
-import javafx.scene.Parent;
-import javafx.scene.Scene;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.ServiceLoader;
-import java.util.concurrent.CountDownLatch;
+import java.util.function.Function;
 
 /**
- * Runs a {@link SceneContent} app on an {@link EInkBridge}. Driver selection is
- * {@link EInkBridge#fromConfig()} (the {@code pux4j.*} system properties plus whichever driver
- * modules are on the module path); the app is a {@code SceneContent} provider found on the
- * module path, chosen by the first argument (or {@code -Dpux4j.app=<name>}) when there is more
- * than one. {@code --list} prints the available app names and exits.
+ * Runs an app found on the module path: {@code pux4j <app> [args...]}. Two kinds of app share
+ * one name space:
+ * <ul>
+ *   <li>JavaFX apps ({@link SceneContent}), run on an {@code EInkBridge} with the drivers chosen
+ *       by the {@code pux4j.*} system properties; extra arguments are ignored with a warning;</li>
+ *   <li>driver apps ({@link DriverApp}), such as the hardware tests, run directly on the main
+ *       thread with everything after the name passed to them unchanged. JavaFX is never started
+ *       for these.</li>
+ * </ul>
+ * The app is the first argument not starting with {@code -}, or {@code -Dpux4j.app=<name>};
+ * with only one app available no name is needed. {@code --list} prints the apps and the driver
+ * factories on the module path, then exits.
  *
- * <p>The main thread stays alive for the whole run: drivers such as the emulator's tie their
- * window's lifetime to the thread that created them.
+ * <p>Apps reporting the same name are selected by their class name instead (see
+ * {@link AppCatalogue}). Exit codes: 0 success, 1 failure, 2 usage error.
+ *
+ * <p>For a JavaFX app the main thread stays alive for the whole run: drivers such as the
+ * emulator's tie their window's lifetime to the thread that created them.
  */
 public final class EInkLauncher {
 
@@ -33,47 +43,64 @@ public final class EInkLauncher {
     }
 
     public static void main(String[] args) throws Exception {
-        if (args.length > 0 && args[0].equals("--list")) {
-            findContent().forEach(c -> System.out.println(c.name()));
-            return;
-        }
-        if (args.length > 0 && !args[0].startsWith("-")) {
-            System.setProperty("pux4j.app", args[0]);
-        }
-        SceneContent content = selectContent();
-        LOG.info("Launching '{}'", content.name());
-        applyDefaultProperties(content.defaultProperties());
+        int code = run(args, findApps(), driverFooter(), System.getProperty("pux4j.app"),
+                System.out, System.err, EInkLauncher::runFx);
+        System.exit(code);
+    }
 
-        // Toolkit first (drivers such as the emulator open windows through it), but drivers
-        // are constructed here, off the FX thread — see EInkBridge's class javadoc.
-        Platform.startup(() -> { });
-        Platform.setImplicitExit(false);
+    /** Starts a JavaFX app; returns an exit code (only on a failed start). */
+    @FunctionalInterface
+    interface FxRunner {
+        int run(Object sceneContent) throws Exception;
+    }
 
-        EInkBridge bridge;
-        try {
-            bridge = EInkBridge.fromConfig();
-        } catch (RuntimeException e) {
-            Platform.exit();
-            throw e;
-        }
-        // Idempotent; runs on Ctrl-C/SIGTERM so the panel is put to sleep.
-        Runtime.getRuntime().addShutdownHook(new Thread(bridge::stop, "launcher-shutdown"));
-
-        CountDownLatch failed = new CountDownLatch(1);
-        Platform.runLater(() -> {
-            try {
-                Parent root = content.createRoot();
-                bridge.start(new Scene(root, bridge.displayWidth(), bridge.displayHeight()));
-            } catch (Throwable t) {
-                LOG.error("Failed to start '{}'", content.name(), t);
-                failed.countDown();
+    /**
+     * The launcher proper, with its environment injected so it can be tested without a module
+     * path, a toolkit or a process exit.
+     *
+     * @param rawApps     the catalogue as reported by the apps; colliding names are resolved here
+     * @param footer      the driver-factory footer printed after the list
+     * @param propertyApp the {@code pux4j.app} property value, or {@code null}
+     * @param fx          how to run a JavaFX app (never called for a driver app)
+     * @return the process exit code
+     */
+    static int run(String[] args, List<AppEntry> rawApps, String footer, String propertyApp,
+                   PrintStream out, PrintStream err, FxRunner fx) {
+        List<AppEntry> apps = AppCatalogue.resolve(rawApps);
+        for (AppEntry app : apps) {
+            if (app.renamed()) {
+                LOG.warn("App name '{}' is used by several apps; this one is selected as '{}'",
+                        app.originalName(), app.name());
             }
-        });
-        // Normal exit is the emulator window closing or a signal; only a failed start returns.
-        failed.await();
-        bridge.stop();
-        Platform.exit();
-        System.exit(1);
+        }
+        if (args.length > 0 && args[0].equals("--list")) {
+            out.print(AppList.format(apps));
+            out.print(footer);
+            return 0;
+        }
+        AppSelection selection = AppSelection.select(apps, args, propertyApp);
+        if (selection.entry() == null) {
+            err.println(selection.error());
+            return selection.exitCode();
+        }
+        AppEntry app = selection.entry();
+        try {
+            if (app.kind() == AppEntry.Kind.DRIVER) {
+                return DriverAppRunner.run((DriverApp) app.source(), selection.appArgs());
+            }
+            if (selection.appArgs().length > 0) {
+                LOG.warn("Ignoring arguments for JavaFX app '{}': {}", app.name(),
+                        List.of(selection.appArgs()));
+            }
+            return fx.run(app.source());
+        } catch (Throwable t) {
+            LOG.error("App '{}' failed", app.name(), t);
+            return 1;
+        }
+    }
+
+    private static int runFx(Object content) throws Exception {
+        return FxAppRunner.run((SceneContent) content);
     }
 
     /**
@@ -91,26 +118,26 @@ public final class EInkLauncher {
         });
     }
 
-    private static List<SceneContent> findContent() {
-        List<SceneContent> found = new ArrayList<>();
-        ServiceLoader.load(SceneContent.class).forEach(found::add);
+    private static List<AppEntry> findApps() {
+        List<AppEntry> found = new ArrayList<>();
+        for (SceneContent c : ServiceLoader.load(SceneContent.class)) {
+            found.add(new AppEntry(AppEntry.Kind.JAVAFX, c.name(), "", c));
+        }
+        for (DriverApp d : ServiceLoader.load(DriverApp.class)) {
+            found.add(new AppEntry(AppEntry.Kind.DRIVER, d.name(), d.description(), d));
+        }
         return found;
     }
 
-    private static SceneContent selectContent() {
-        String wanted = System.getProperty("pux4j.app");
-        List<SceneContent> found = findContent();
-        List<String> names = found.stream().map(SceneContent::name).toList();
-        if (wanted != null) {
-            return found.stream().filter(c -> c.name().equals(wanted)).findFirst()
-                    .orElseThrow(() -> new IllegalStateException(
-                            "No SceneContent named '" + wanted + "'; available: " + names));
-        }
-        if (found.size() != 1) {
-            throw new IllegalStateException(found.isEmpty()
-                    ? "No SceneContent provider on the module path"
-                    : "Several SceneContent providers " + names + "; choose one by name (first argument)");
-        }
-        return found.get(0);
+    private static String driverFooter() {
+        return AppList.footer(
+                names(DisplayDriverFactory.class, DisplayDriverFactory::name),
+                names(TouchDriverFactory.class, TouchDriverFactory::name));
+    }
+
+    private static <T> List<String> names(Class<T> type, Function<T, String> name) {
+        List<String> names = new ArrayList<>();
+        ServiceLoader.load(type).forEach(f -> names.add(name.apply(f)));
+        return names.stream().distinct().sorted().toList();
     }
 }
