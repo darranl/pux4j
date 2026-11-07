@@ -10,7 +10,7 @@
 # Each line is prefixed [CORRUPT] for easy filtering:
 #   grep '\[CORRUPT\]' <logfile>
 #
-# Usage: loaded via --enable-byteman on the run-smoke-test.sh script.
+# Usage: on the Pi, PUX4J_JAVA_OPTS="-javaagent:<byteman.jar>=script:<bundle>/byteman/partial-corruption-check.btm" pux4j smoke
 # Only rules matching loaded classes will fire — unused rules are silently ignored.
 
 RULE ssd1680 sendData full-frame corruption entry

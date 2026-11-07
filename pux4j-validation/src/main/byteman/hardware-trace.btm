@@ -8,7 +8,7 @@
 # Each line is prefixed [HW-TRACE] for easy filtering:
 #   grep '\[HW-TRACE\]' <logfile>
 #
-# Usage: loaded via pux4j-smoke-test --enable-byteman on the Pi.
+# Usage: on the Pi, PUX4J_JAVA_OPTS="-javaagent:<byteman.jar>=script:<bundle>/byteman/hardware-trace.btm" pux4j smoke
 # Requires ByteMan 4.x and -javaagent byteman.jar on the JVM command line.
 # Only rules matching loaded classes will fire — unused rules are silently ignored.
 

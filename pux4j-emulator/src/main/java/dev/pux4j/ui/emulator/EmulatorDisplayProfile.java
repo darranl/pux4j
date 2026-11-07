@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
  * emulator has no physical mounting, so {@link EmulatedEInkDisplay} performs that rotation
  * itself using {@code orientation} (via {@code OrientationMapping} in {@code pux4j-core}),
  * matching each profile's real hardware orientation exactly
- * ({@code dist-hat-2in9v2}/{@code dist-hat-2in13v4} in {@code pux4j-validation/pom.xml}).
+ * (the factories in {@code pux4j-driver-hat-2in9v2} and {@code pux4j-driver-hat-2in13v4}).
  * Storing native dimensions here — rather than the marketed resolution — means deriving the
  * on-screen size, if ever needed, goes through {@code OrientationMapping.of(...)} the same
  * direction every other caller uses it, with no separate reverse-direction lookup.

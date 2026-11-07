@@ -16,10 +16,8 @@
         Phase 6.4 part D: a runnable, self-verifying headless smoke test that wires EInkBridge
         to the PNG display driver and the programmatic touch driver and drives it with injected
         touches. Deliberately its own module, not part of pux4j-validation: it requires
-        javafx.controls/javafx.graphics, which pux4j-validation's hardware dist profiles
-        (dist-hat-2in13v4/dist-hat-2in9v2) exclude from their lib/ — adding this dependency
-        there would break both dist launchers on the Pi. This module is never packaged into
-        either dist.
+        javafx.controls/javafx.graphics, and pux4j-validation must stay free of JavaFX so its
+        tests can run without a toolkit. This module is never packaged into a Pi bundle.
     </description>
 
     <properties>

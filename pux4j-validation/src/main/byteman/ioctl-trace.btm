@@ -35,7 +35,7 @@
 # Reconstruct command sequences:
 #   grep '\[IOCTL\]' <logfile> | awk '/CMD /{cmd=$NF} /DATA/{print cmd, $0}'
 #
-# Usage: loaded via pux4j-smoke-test --enable-ioctl-trace on littleraspberry.
+# Usage: on the Pi, PUX4J_JAVA_OPTS="-javaagent:<byteman.jar>=script:<bundle>/byteman/ioctl-trace.btm" pux4j smoke
 # Requires ByteMan 4.x and -javaagent:byteman.jar on the JVM command line.
 # No --add-opens required: all accessed methods are public API.
 
