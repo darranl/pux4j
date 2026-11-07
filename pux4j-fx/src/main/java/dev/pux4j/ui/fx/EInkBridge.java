@@ -432,11 +432,11 @@ public final class EInkBridge {
      * class load, not by this method).
      *
      * <p>Orientation: every real driver reads a plain {@code "orientation"} string property
-     * from {@link DriverConfig} at construction time (there is no post-construction setter),
-     * and defaults it to {@code PORTRAIT} if absent — which does not generally match how the
-     * panel is physically mounted. So unless {@code pux4j.display.orientation} is set
-     * explicitly, this method threads the factory's own
-     * {@link DisplayDriverFactory#physicalOrientation()} through instead, the same way
+     * from {@link DriverConfig} at construction time (there is no post-construction setter).
+     * The HAT display factories default it to their own
+     * {@link DisplayDriverFactory#physicalOrientation()} when the key is absent. Unless
+     * {@code pux4j.display.orientation} is set explicitly, this method threads that same
+     * value through explicitly, the same way
      * {@code DisplaySmokeTest}/{@code HardwareValidationTest} already do. Drivers with no
      * fixed physical mounting (e.g. the PNG driver) throw
      * {@link UnsupportedOperationException} from {@code physicalOrientation()}; that case

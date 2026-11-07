@@ -27,6 +27,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -88,7 +89,8 @@ final class Ssd1680DisplayDriver implements EInkDisplayDriver {
     Ssd1680DisplayDriver(Pux4jContext context, DriverConfig config) {
         Context ctx = context.pi4j();
 
-        orientation = Orientation.valueOf(config.property("orientation", "PORTRAIT"));
+        orientation = Orientation.valueOf(Objects.requireNonNull(config.property("orientation", (String) null),
+            "orientation is supplied by the factory"));
 
         int dcPin   = config.property("dcPin",   25);
         int rstPin  = config.property("rstPin",  17);

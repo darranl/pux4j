@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HexFormat;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -205,7 +206,8 @@ final class Ssd1675aDisplayDriver implements EInkDisplayDriver {
     Ssd1675aDisplayDriver(Pux4jContext context, DriverConfig config) {
         Context ctx = context.pi4j();
 
-        orientation = Orientation.valueOf(config.property("orientation", "PORTRAIT"));
+        orientation = Orientation.valueOf(Objects.requireNonNull(config.property("orientation", (String) null),
+            "orientation is supplied by the factory"));
 
         // SPLIT_FLASH is the default: the vendor order shows the old and new images overlaid
         // during a refresh. The -D form is read here because the bridge only forwards the orientation to drivers.

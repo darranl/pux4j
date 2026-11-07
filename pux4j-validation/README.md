@@ -128,9 +128,6 @@ Examples:
 # Run all available scenarios
 ./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --all-scenarios
 
-# Enable partial-refresh prompts (default is full refresh prompts)
-./pux4j-validation/run-hardware-validation.sh pi500-2in9 -- --use-partial-prompts
-
 # Fully custom invocation
 ./pux4j-validation/run-hardware-validation.sh custom -- \
   --display ssd1675a \

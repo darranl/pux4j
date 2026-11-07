@@ -97,6 +97,24 @@ public final class DriverConfig {
         return strProperties.getOrDefault(key, defaultValue);
     }
 
+    /**
+     * Returns a configuration equal to this one, except that the string property {@code key}
+     * is set to {@code defaultValue} when it is absent. An existing value (of either type)
+     * is never replaced.
+     *
+     * @param key          the configuration key
+     * @param defaultValue value to use when the key is absent
+     * @return this configuration if {@code key} is already present, otherwise a copy with the default added
+     */
+    public DriverConfig withDefault(String key, String defaultValue) {
+        if (strProperties.containsKey(key) || intProperties.containsKey(key)) {
+            return this;
+        }
+        Map<String, String> str = new HashMap<>(strProperties);
+        str.put(key, defaultValue);
+        return new DriverConfig(intProperties, str);
+    }
+
     // -------------------------------------------------------------------------
     // JSON parsing
     // -------------------------------------------------------------------------

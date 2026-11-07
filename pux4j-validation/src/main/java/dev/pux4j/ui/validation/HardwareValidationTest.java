@@ -72,10 +72,6 @@ public final class HardwareValidationTest {
 
             String resolvedDisplay = displayFactory.name();
             String resolvedTouch = touchFactory.name();
-            int touchI2cAddress = options.touchI2cAddress >= 0
-                ? options.touchI2cAddress
-                : (resolvedTouch.equals("gt1151q") ? 0x14 : 0x48);
-
             // options.orientation is null unless --orientation was passed explicitly — the
             // normal case derives it from the selected display's own fixed physical mounting
             // orientation (DisplayDriverFactory.physicalOrientation()), the single owned source
@@ -88,7 +84,7 @@ public final class HardwareValidationTest {
             log.info("HardwareValidationTest: displayDriver={}, touchDriver={}, orientation={}",
                 resolvedDisplay, resolvedTouch, orientation);
 
-            DriverConfig config = createDriverConfig(options, orientation, touchI2cAddress);
+            DriverConfig config = createDriverConfig(options, orientation);
 
             display = displayFactory.create(ctx, config);
             touch = touchFactory.create(ctx, config);
@@ -287,44 +283,52 @@ public final class HardwareValidationTest {
         log.info("PHASE instruction-wait: tap received after prompt");
     }
 
-    private static DriverConfig createDriverConfig(Options options, Orientation orientation, int touchI2cAddress) {
-        return DriverConfig.builder()
-            .property("orientation", orientation.name())
-            .property("dcPin", options.dcPin)
-            .property("rstPin", options.rstPin)
-            .property("busyPin", options.busyPin)
-            .property("touchI2cAddress", touchI2cAddress)
-            .property("touchRstPin", options.touchRstPin)
-            .property("touchIntPin", options.touchIntPin)
-            .build();
+    private static DriverConfig createDriverConfig(Options options, Orientation orientation) {
+        return options.driverConfig(orientation);
     }
 
-    private record Options(
+    record Options(
         String displayDriver,
         String touchDriver,
         Orientation orientation,
-        int dcPin,
-        int rstPin,
-        int busyPin,
-        int touchI2cAddress,
-        int touchRstPin,
-        int touchIntPin,
+        Integer dcPin,
+        Integer rstPin,
+        Integer busyPin,
+        Integer touchI2cAddress,
+        Integer touchRstPin,
+        Integer touchIntPin,
         int scenarioCount,
         int startStep,
         String notes
     ) {
-        private static Options parse(String[] args) {
+        /**
+         * Builds the driver config. Pin and address keys are written only when the matching
+         * flag was passed; otherwise the drivers' own defaults apply.
+         */
+        DriverConfig driverConfig(Orientation resolvedOrientation) {
+            var builder = DriverConfig.builder().property("orientation", resolvedOrientation.name());
+            if (dcPin != null) builder.property("dcPin", dcPin);
+            if (rstPin != null) builder.property("rstPin", rstPin);
+            if (busyPin != null) builder.property("busyPin", busyPin);
+            if (touchI2cAddress != null) builder.property("touchI2cAddress", touchI2cAddress);
+            if (touchRstPin != null) builder.property("touchRstPin", touchRstPin);
+            if (touchIntPin != null) builder.property("touchIntPin", touchIntPin);
+            return builder.build();
+        }
+
+        static Options parse(String[] args) {
             String displayDriver = null;
             String touchDriver = null;
             // null means "derive from the selected display's physicalOrientation()"; only
             // drivers with no fixed physical orientation (e.g. png) require --orientation.
             Orientation orientation = null;
-            int dcPin = 25;
-            int rstPin = 17;
-            int busyPin = 24;
-            int touchI2cAddress = -1;
-            int touchRstPin = 22;
-            int touchIntPin = 27;
+            // null means "flag not passed": the driver's own default applies.
+            Integer dcPin = null;
+            Integer rstPin = null;
+            Integer busyPin = null;
+            Integer touchI2cAddress = null;
+            Integer touchRstPin = null;
+            Integer touchIntPin = null;
             int scenarioCount = Integer.MAX_VALUE;
             int startStep = 0;
             String notes = "";
@@ -361,7 +365,7 @@ public final class HardwareValidationTest {
             }
 
             // displayDriver and touchDriver remain null → auto-selected from ServiceLoader later
-            // touchI2cAddress remains -1 → derived from resolved touch driver name in main()
+            // pin and address options remain null unless passed → the drivers' own defaults apply
 
             return new Options(
                 displayDriver,

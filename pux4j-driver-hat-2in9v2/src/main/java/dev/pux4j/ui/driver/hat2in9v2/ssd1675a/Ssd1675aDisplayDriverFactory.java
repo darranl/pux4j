@@ -29,7 +29,13 @@ public final class Ssd1675aDisplayDriverFactory implements DisplayDriverFactory 
 
     @Override
     public EInkDisplayDriver create(Pux4jContext context, DriverConfig config) {
-        return new Ssd1675aDisplayDriver(context, config);
+        // The factory owns the physical mounting; an explicit "orientation" key still wins.
+        return new Ssd1675aDisplayDriver(context, withDefaultOrientation(config));
+    }
+
+    /** Resolves the {@code orientation} key: the configured value if present, else {@link #physicalOrientation()}. */
+    DriverConfig withDefaultOrientation(DriverConfig config) {
+        return config.withDefault("orientation", physicalOrientation().name());
     }
 
     /** hat-2in9v2/SSD1675A is physically mounted 180 degrees from hat-2in13v4/SSD1680. */
