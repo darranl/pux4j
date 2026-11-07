@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests of the bundle scripts bin/pux4j and bin/install.sh. Needs only bash and coreutils; no
+# Tests of the bundle scripts bin/pux4j and bin/install.sh, and of run-javafx.sh. Needs only bash and coreutils; no
 # Java, no device: a fake `java` placed first on PATH stands in for the JVM.
 #
 # Run from the repository root:   pux4j-bundle/src/test/scripts/bundle-scripts-test.sh
@@ -101,6 +101,38 @@ check "install: succeeds with an existing ~/bin" eq "$code" 0
 check "install: no PATH hint when ~/bin is on PATH" bash -c '[[ $1 != *"not on your PATH"* && $1 == *"is on your PATH"* ]]' _ "$out"
 check "install: link is executable" test -x "$H2/bin/pux4j"
 check "install: no shell profile created" bash -c '! ls -A "$1" | grep -q "^\.\(profile\|bashrc\|bash_profile\)"' _ "$H2"
+
+# --- run-javafx.sh -----------------------------------------------------------------------------------
+# A staged copy next to a fake target/run-lib holding placeholder jars of the two demos.
+JFX="$WORK/jfx"
+mkdir -p "$JFX/target/run-lib"
+cp "$HERE/../../../run-javafx.sh" "$JFX/run-javafx.sh"
+chmod +x "$JFX/run-javafx.sh"
+
+"$JFX/run-javafx.sh" --help > "$WORK/jfx-help.txt" 2>&1; code=$?
+check "run-javafx: --help exits 0" eq "$code" 0
+check "run-javafx: --help prints usage" grep -q "dice-demo" "$WORK/jfx-help.txt"
+out=$("$JFX/run-javafx.sh" 2>&1); code=$?
+check "run-javafx: no app is a usage error (2)" eq "$code" 2
+out=$("$JFX/run-javafx.sh" smoke 2>&1); code=$?
+check "run-javafx: an app that is not a JavaFX program is refused (2)" eq "$code" 2
+check "run-javafx: the refusal names the valid apps" has "$out" "demo and dice-demo"
+out=$("$JFX/run-javafx.sh" demo 2>&1); code=$?
+check "run-javafx: not built is a usage error (2)" eq "$code" 2
+check "run-javafx: not built says to run mvn install" has "$out" "mvn install"
+
+touch "$JFX/target/run-lib/pux4j-demo-0.1.0.jar" "$JFX/target/run-lib/pux4j-dice-demo-0.1.0.jar" "$JFX/target/run-lib/x.jar"
+PATH="$FAKE:$PATH" "$JFX/run-javafx.sh" demo --scale=2 --no-bezel -Dfoo=bar >/dev/null 2>&1; code=$?
+check "run-javafx: exit code of java (3) is the script's exit code" eq "$code" 3
+args=$(tr '\n' ' ' < "$FAKE_JAVA_ARGS")
+check "run-javafx: module path lists the run-lib jars" has "$args" "target/run-lib/pux4j-demo-0.1.0.jar:"
+check "run-javafx: native access option set" has "$args" "ARG:--enable-native-access=javafx.graphics "
+check "run-javafx: -D goes to the JVM, before -m" has "$args" "ARG:-Dfoo=bar ARG:-m "
+check "run-javafx: demo runs DemoApp" has "$args" "ARG:dev.pux4j.ui.demo/dev.pux4j.ui.demo.DemoApp "
+check "run-javafx: options reach the program after the main class" has "$args" "DemoApp ARG:--scale=2 ARG:--no-bezel"
+PATH="$FAKE:$PATH" "$JFX/run-javafx.sh" dice-demo >/dev/null 2>&1
+args=$(tr '\n' ' ' < "$FAKE_JAVA_ARGS")
+check "run-javafx: dice-demo runs DiceDemoApp" has "$args" "ARG:dev.pux4j.ui.dice.demo/dev.pux4j.ui.dice.demo.DiceDemoApp"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "All checks passed."; else echo "$FAILS check(s) failed."; fi

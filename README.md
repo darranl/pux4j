@@ -404,34 +404,45 @@ pipeline. See [Emulating different hardware](#emulating-different-hardware).
 ## Run the JavaFX apps directly
 
 `demo` and `dice-demo` are ordinary JavaFX programs, and each module also contains a plain desktop window for
-it that does not use `pux4j` at all: `DemoApp` in `pux4j-demo` and `DiceDemoApp` in `pux4j-dice-demo`. They
-open a normal JavaFX window laid out for the 296×128 panel, with no emulator, no drivers and no launcher.
-That makes them handy for working on an app's layout and behaviour like any other JavaFX program, before
-trying it on the emulator or a panel.
+it that does not use `pux4j`'s display support at all: `DemoApp` in `pux4j-demo` and `DiceDemoApp` in
+`pux4j-dice-demo`. They open a normal JavaFX window laid out for the 296×128 panel, with no emulator, no
+drivers and no launcher. That makes them handy for working on an app's layout and behaviour like any other
+JavaFX program, before trying it on the emulator or a panel.
+
+To make it obvious which one you are looking at, this plain JavaFX window is drawn in colour, with navy,
+burgundy and an off-white background, while the emulator and the panel show the same app in black and white:
+
+<p>
+  <img src="docs/images/javafx-demo.png" alt="The counter app as a plain JavaFX window: navy frame, off-white background, burgundy number" width="345"/>
+  <img src="docs/images/javafx-dice-demo.png" alt="The dice app as a plain JavaFX window: navy frame, off-white background, burgundy pips" width="345"/>
+</p>
+
+The colours are a style sheet that only the plain window switches on (the `pux4j-desktop` style class), so
+nothing changes in how the apps are drawn on the emulator or the panel. The dark colours are deliberately
+very dark: `pux4j` turns colour into a grey level before drawing it on an eInk panel, and anything this dark
+comes out black and the off-white comes out white.
 
 Build first (`mvn install`, as in [Try it: run the emulator](#try-it-run-the-emulator)), then run from the
 root of the `pux4j` repository:
 
 ```bash
-java --module-path pux4j-bundle/target/run-lib --enable-native-access=javafx.graphics \
-     -m dev.pux4j.ui.demo/dev.pux4j.ui.demo.DemoApp                    # counter app
-java --module-path pux4j-bundle/target/run-lib --enable-native-access=javafx.graphics \
-     -m dev.pux4j.ui.dice.demo/dev.pux4j.ui.dice.demo.DiceDemoApp      # dice rolling app
+pux4j-bundle/run-javafx.sh demo           # counter app
+pux4j-bundle/run-javafx.sh dice-demo      # dice rolling app
+pux4j-bundle/run-javafx.sh demo --scale=2 --no-bezel
 ```
 
-`pux4j-bundle/target/run-lib` is the directory of jars that `mvn install` leaves for the emulator bundle;
-it holds everything these two programs need. Options go at the end of the command:
+The script, like `run-emulator.sh`, only runs what the last build left; it never builds. Options go after the
+app name:
 
 | Option | Meaning |
 |---|---|
 | `--scale=<n>` | Zoom the window; the default is `3`, and `1` is pixel-exact |
-| `--no-bezel` | Drop the black frame drawn around the display area (`--bezel` puts it back; it is on by default) |
+| `--no-bezel` | Drop the frame drawn around the display area (`--bezel` puts it back; it is on by default) |
 
 The window has no title bar. Drag it with the mouse, and right-click it for an **Exit** menu. JavaFX may
-print `sun.misc.Unsafe` warnings when it starts; they do not affect the app.
-
-There is no script for this yet; to see the apps on the emulator or a panel instead, use `run-emulator.sh`
-or `pux4j` as described above.
+print `sun.misc.Unsafe` warnings when it starts; they do not affect the app. `pux4j-bundle/run-javafx.sh
+--help` shows the usage. To see the apps on the emulator or a panel instead, use `run-emulator.sh` or
+`pux4j` as described above.
 
 ---
 

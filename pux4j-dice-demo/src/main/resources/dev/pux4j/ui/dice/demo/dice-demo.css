@@ -65,3 +65,67 @@
 .die-view {
     -fx-cursor: hand;
 }
+
+/* Plain JavaFX window only. DemoApp / DiceDemoApp add the pux4j-desktop style class so a desktop run looks
+   different from the black and white eInk rendering; the bridge and the emulator never add it, so the
+   rules above are what the panel and the emulator draw.
+   Palette: navy #1C2B5A, burgundy #6B1B33, off-white #F7F2E8 (hover tint #ECE5D6).
+   The dark colours are deliberately very dark: the eInk pipeline reduces colour to luminance, so anything
+   below about 64 (of 255) comes out black in monochrome and in 4-gray, and the light ones above 192 white. */
+.pux4j-desktop.eink-frame {
+    -fx-background-color: #1C2B5A;
+}
+
+.pux4j-desktop .display-area {
+    -fx-background-color: #F7F2E8;
+}
+
+.pux4j-desktop .button-row {
+    -fx-background-color: #F7F2E8;
+    -fx-border-color: #1C2B5A;
+}
+
+.pux4j-desktop .action-button {
+    -fx-background-color: #F7F2E8;
+    -fx-text-fill: #1C2B5A;
+}
+
+.pux4j-desktop .action-button-left {
+    -fx-border-color: #1C2B5A;
+}
+
+.pux4j-desktop .action-button:hover {
+    -fx-background-color: #ECE5D6;
+}
+
+.pux4j-desktop .action-button:pressed {
+    -fx-background-color: #6B1B33;
+    -fx-text-fill: #F7F2E8;
+}
+
+/* On the desktop a disabled button is dimmed (the eInk rendering inverts it instead). */
+.pux4j-desktop .action-button:disabled {
+    -fx-opacity: 0.4;
+}
+
+/* Dice: DieView paints black and white in code and tags its shapes with these classes. A saved die is
+   shown in navy with off-white pips. */
+.pux4j-desktop .die-border {
+    -fx-fill: #1C2B5A;
+}
+
+.pux4j-desktop .die-face {
+    -fx-fill: #F7F2E8;
+}
+
+.pux4j-desktop .die-pip {
+    -fx-fill: #6B1B33;
+}
+
+.pux4j-desktop .die-face.die-saved {
+    -fx-fill: #1C2B5A;
+}
+
+.pux4j-desktop .die-pip.die-saved {
+    -fx-fill: #F7F2E8;
+}

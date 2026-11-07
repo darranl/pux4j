@@ -62,6 +62,7 @@ final class DieView extends Pane {
         border.setArcWidth(arc);
         border.setArcHeight(arc);
         border.setFill(fg);
+        border.getStyleClass().add("die-border");
 
         // Inner face (slightly smaller rounded rect filled with bg colour).
         double innerArc = Math.max(0, arc - borderWidth);
@@ -70,6 +71,10 @@ final class DieView extends Pane {
         face.setArcWidth(innerArc);
         face.setArcHeight(innerArc);
         face.setFill(bg);
+        face.getStyleClass().add("die-face");
+        if (saved) {
+            face.getStyleClass().add("die-saved");
+        }
 
         getChildren().addAll(border, face);
 
@@ -81,6 +86,10 @@ final class DieView extends Pane {
                 double cy = margin + pad + pos[0] * (dh - 2 * pad) / 2.0;
                 Circle dot = new Circle(cx, cy, pipR);
                 dot.setFill(fg);
+                dot.getStyleClass().add("die-pip");
+                if (saved) {
+                    dot.getStyleClass().add("die-saved");
+                }
                 getChildren().add(dot);
             }
         }

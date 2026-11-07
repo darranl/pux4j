@@ -41,6 +41,9 @@ public final class DiceDemoApp extends Application {
         }
 
         StackPane root = new DiceContent().createRoot();
+        // Colours (see the stylesheet) only for this plain JavaFX window, so it is easy to tell apart from
+        // the black and white eInk rendering; the bridge and the emulator never add this class.
+        root.getStyleClass().add("pux4j-desktop");
         if (showBezel) {
             root.getStyleClass().add("eink-frame");
         }
