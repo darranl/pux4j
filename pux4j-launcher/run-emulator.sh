@@ -26,7 +26,10 @@ for arg in "$@"; do
 done
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-LAUNCHER_JAR="$SCRIPT_DIR/target/pux4j-launcher-0.1.0-SNAPSHOT.jar"
+LAUNCHER_JAR=""
+for jar in "$SCRIPT_DIR"/target/pux4j-launcher-*.jar; do
+  case "$jar" in *-sources.jar|*-javadoc.jar|*-tests.jar) ;; *) LAUNCHER_JAR="$jar" ;; esac
+done
 LIB_DIR="$SCRIPT_DIR/target/run-lib"
 
 if [[ ! -f "$LAUNCHER_JAR" || ! -d "$LIB_DIR" ]]; then
@@ -49,6 +52,6 @@ done
 exec java \
   --module-path "$MODULE_PATH" \
   --enable-native-access=javafx.graphics \
-  "${JVM_ARGS[@]}" \
+  ${JVM_ARGS[@]+"${JVM_ARGS[@]}"} \
   -m dev.pux4j.ui.launcher/dev.pux4j.ui.launcher.EInkLauncher \
-  "${APP_ARGS[@]}"
+  ${APP_ARGS[@]+"${APP_ARGS[@]}"}

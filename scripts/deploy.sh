@@ -2,8 +2,8 @@
 # Deploy the pux4j bundle to a Raspberry Pi.
 #
 # The script does not build anything. Build the bundle for your HAT first, from the repository root:
-#     mvn package -Pbundle-hat-2in9v2       # 2.9" V2 HAT
-#     mvn package -Pbundle-hat-2in13v4      # 2.13" V4 HAT
+#     mvn package -DskipTests -Pbundle-hat-2in9v2       # 2.9" V2 HAT
+#     mvn package -DskipTests -Pbundle-hat-2in13v4      # 2.13" V4 HAT
 # which leaves pux4j-launcher/target/pux4j/. This script copies that directory to the Pi
 # and runs its bin/install.sh there. The bundle carries one HAT's drivers; deploy the
 # bundle that matches the HAT on that Pi (the script prints which one it is).
@@ -12,9 +12,11 @@
 #   scripts/deploy.sh [OPTIONS] <host>
 #
 # Options:
-#   --user <user>     SSH user (default: your local user name)
+#   --user <user>     SSH user (default: whatever ssh chooses, e.g. the User in ~/.ssh/config,
+#                     otherwise your local user name)
 #   --dir <dir>       Directory on the Pi that will contain the "pux4j" bundle directory.
-#                     Relative paths are relative to the Pi user's home.
+#                     Relative paths are relative to the Pi user's home; a leading "~/" is
+#                     accepted and means the same. (Quote it, or the laptop shell expands the ~.)
 #                     Default: applications   (the bundle goes to ~/applications/pux4j)
 #   --dry-run         Print what would be done without connecting or changing anything
 #   -h, --help        Show this help
@@ -30,7 +32,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUNDLE="$(cd "$SCRIPT_DIR/.." && pwd)/pux4j-launcher/target/pux4j"
 
-TARGET_USER="${USER:-}"
+TARGET_USER=""
 PARENT_DIR="applications"
 DRY_RUN=0
 TARGET_HOST=""
@@ -50,7 +52,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 [[ -n "$TARGET_HOST" ]] || { echo "ERROR: <host> is required (see --help)" >&2; exit 2; }
-[[ -n "$PARENT_DIR" ]] || { echo "ERROR: --dir must not be empty" >&2; exit 2; }
+PARENT_DIR="${PARENT_DIR#\~/}"      # "~/x" means x, relative to the Pi user's home
+[[ -n "$PARENT_DIR" && "$PARENT_DIR" != "~" ]] || { echo "ERROR: --dir must be a directory name" >&2; exit 2; }
 
 log() { echo "[deploy] $*"; }
 
@@ -58,8 +61,8 @@ log() { echo "[deploy] $*"; }
 if [[ ! -d "$BUNDLE/lib" || ! -f "$BUNDLE/bin/pux4j" || ! -f "$BUNDLE/bin/install.sh" ]]; then
     echo "ERROR: the bundle is not built: $BUNDLE" >&2
     echo "       Build it first, from the repository root, for the HAT on the Pi:" >&2
-    echo "           mvn package -Pbundle-hat-2in9v2     (2.9\" V2 HAT)" >&2
-    echo "           mvn package -Pbundle-hat-2in13v4    (2.13\" V4 HAT)" >&2
+    echo "           mvn package -DskipTests -Pbundle-hat-2in9v2     (2.9\" V2 HAT)" >&2
+    echo "           mvn package -DskipTests -Pbundle-hat-2in13v4    (2.13\" V4 HAT)" >&2
     exit 2
 fi
 
@@ -104,12 +107,14 @@ else
 fi
 
 # --- 2. copy the bundle ------------------------------------------------------
-REMOTE_UNPACK="set -e; d=$REMOTE_DIR_SH; mkdir -p \"\$d\"; cd \"\$d\"; rm -rf lib bin conf byteman; tar -xf -"
+# Unpack next to the old files first; the old lib/ bin/ conf/ byteman/ are replaced only after the
+# whole stream arrived, so a failed transfer leaves the previous deployment working.
+REMOTE_UNPACK="set -e; d=$REMOTE_DIR_SH; mkdir -p \"\$d\"; cd \"\$d\"; rm -rf .new; mkdir .new; tar -xf - -C .new; rm -rf lib bin conf byteman; mv .new/* .; rmdir .new"
 log "copying lib/ bin/ conf/ byteman/ (logs/ is kept)..."
 if [[ $DRY_RUN -eq 1 ]]; then
     log "[DRY RUN] would run: tar -C $BUNDLE -cf - lib bin conf byteman | ssh $REMOTE '<replace those directories under $PARENT_DIR/pux4j and unpack>'"
 else
-    tar -C "$BUNDLE" -cf - lib bin conf byteman | ssh "$REMOTE" "$REMOTE_UNPACK"
+    COPYFILE_DISABLE=1 tar -C "$BUNDLE" -cf - lib bin conf byteman | ssh "$REMOTE" "$REMOTE_UNPACK"
 fi
 
 # --- 3. install ----------------------------------------------------------------

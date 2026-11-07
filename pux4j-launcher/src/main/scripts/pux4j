@@ -18,8 +18,8 @@
 #                          argument goes to the launcher.
 #
 # Environment:
-#   PUX4J_JAVA_OPTS   extra JVM options, split on whitespace like ordinary shell options and
-#                     placed before the module arguments, e.g.
+#   PUX4J_JAVA_OPTS   extra JVM options, split on whitespace (quotes are not interpreted, so an
+#                     option cannot contain a space) and placed before the module arguments, e.g.
 #                       PUX4J_JAVA_OPTS="-Xmx256m -Dfoo=bar" pux4j demo
 #   DISPLAY           defaults to :0. The JavaFX apps (not smoke or validation) need a desktop
 #                     session on the Pi even though nothing is shown on it, and DISPLAY must
@@ -93,8 +93,12 @@ run_java() {
 
 if [ "$LIST" -eq 1 ] || [ -z "$APP_NAME" ]; then
   run_java
-else
+elif [[ $APP_NAME =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
   mkdir -p "$HOME_DIR/logs"
-  # pipefail makes the pipeline's status the java process's status
-  run_java | tee "$HOME_DIR/logs/$APP_NAME.log"
+  # pipefail makes the pipeline's status the java process's status. tee -i ignores Ctrl-C so the
+  # app's shutdown messages (after Ctrl-C reaches java) still reach the terminal and the log.
+  run_java | tee -i "$HOME_DIR/logs/$APP_NAME.log"
+else
+  # not a usable file name (for example a path): run without a log file
+  run_java
 fi

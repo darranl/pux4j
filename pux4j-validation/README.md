@@ -56,7 +56,7 @@ the launcher.
 - Full interactive acceptance test for display and touch mapping, using instruction, challenge and
   feedback phases. It checks that the display is the right way up and that touch coordinates line up
   with what is drawn.
-- The default run executes the first 2 scenarios; more can be enabled.
+- By default it runs all scenarios; `--scenario-count <n>` limits the run to the first n.
 - Writes a report named `validation-report-YYYYMMDD-HHMMSS.txt` into the directory you ran it from.
 - Use it after the smoke test passes, and when checking touch coordinate mapping.
 
@@ -65,7 +65,7 @@ Options:
 | Option | Meaning |
 |---|---|
 | `--start-step <n>` | Jump to step n |
-| `--scenario-count <n>` / `--all-scenarios` | How many scenarios to run |
+| `--scenario-count <n>` / `--all-scenarios` | How many scenarios to run (default: all) |
 | `--notes "text"` | Text recorded in the report |
 | `--display <driver>`, `--touch <driver>` | Choose drivers by name instead of auto-selection |
 | `--orientation <name>` | Explicit orientation, for drivers with no fixed physical orientation (for example `--display png`) |

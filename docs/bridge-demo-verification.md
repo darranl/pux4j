@@ -57,18 +57,15 @@ the mouse acts as the finger. Check:
 
 ### Running it
 
-A hardware bundle is the `bundle-hat-2in13v4` profile of `pux4j-launcher`: the launcher, the
-demo apps and the 2.13" V4 HAT drivers (SSD1680 + GT1151Q) instead of the emulator. It is built
-for the Pi with the aarch64 JavaFX jars:
+Build the bundle for the HAT on the Pi and deploy it, as described in the main README
+([Deploy to a Raspberry Pi](../README.md#deploy-to-a-raspberry-pi)), for example for the 2.13" V4 HAT:
 
 ```bash
-mvn -pl pux4j-launcher -am -Pbundle-hat-2in13v4 -Djavafx.platform=linux-aarch64 \
-    -DskipTests -DincludeScope=runtime \
-    package dependency:copy-dependencies -DoutputDirectory=<dir>/lib
+mvn package -DskipTests -Pbundle-hat-2in13v4
+scripts/deploy.sh <host>
 ```
 
-Put `<dir>/lib` and `pux4j-launcher-*.jar` (into the same `lib/`) on the Pi, with
-`pux4j-launcher/src/main/scripts/pux4j` in a `bin/` directory next to it. On the Pi:
+Then, on the Pi:
 
 ```bash
 pux4j --list        # the apps in the bundle
@@ -77,10 +74,9 @@ pux4j dice-demo     # run the dice demo
 ```
 
 Other `pux4j.*` properties go on the same line as `-D` options, e.g.
-`pux4j demo -Dpux4j.display.orientation=LANDSCAPE`. The Pi needs a JDK 25 on the `PATH` and a
-graphical session (JavaFX starts a toolkit even though nothing is shown on it): from a plain SSH
-shell `DISPLAY` must point at that session, and the script defaults it to `:0`. Output is also
-written to `~/tmp/run-log.txt`.
+`pux4j demo -Dpux4j.display.orientation=LANDSCAPE`. The JavaFX apps need a desktop session (see
+[DISPLAY and the desktop session](../README.md#display-and-the-desktop-session) in the main README).
+Output is also written to `logs/demo.log` in the bundle directory.
 
 ### What to expect
 
@@ -105,4 +101,4 @@ between reports and a single tap can register several clicks.
 This is unit-tested (`TouchContactTrackerTest`) but the chip's real report timing is only
 confirmed on hardware. If one tap still changes the counter by more than one, or a tap feels
 slow to release, that is where to look. The 2.9" HAT's ICNT86X driver has the same
-INT-high-means-empty pattern and has not been changed.
+INT-high-means-empty pattern and has its own contact tracker.

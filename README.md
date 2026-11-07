@@ -39,17 +39,22 @@ emulator profile, driver names).
 
 ## What you need
 
-**On the laptop (where you build):** Java 25 (any JDK 25 distribution) and Maven. The first
-build downloads the dependencies, including the aarch64 JavaFX jars used for Pi bundles, from
-Maven Central.
+**On the laptop (where you build):** Java 25 (any JDK 25 distribution) and Maven (3.9 and 3.10
+tested). The first build downloads the dependencies, including the aarch64 JavaFX jars used for
+Pi bundles, from Maven Central, so it needs network access and takes a few minutes. The build and
+these instructions are tested on Arch Linux, x86_64. Some JavaFX tests are skipped when there is
+no display, and Pi4J logs a "no suitable user group" error line in some tests on a laptop; both are
+expected.
 
 **On each Raspberry Pi (where you run):**
 
 1. **Java 25** on the default `PATH` (the JVM bundle runs on the Pi's own JDK). A JDK 25 for
    Linux aarch64 is available from [Adoptium Temurin](https://adoptium.net/temurin/releases/?version=25)
    ([Linux installation instructions](https://adoptium.net/installation/linux/)). Check with
-   `java -version`. It must be on the `PATH` of a non-interactive `ssh` shell too; if you install
-   it through a tool that only sets the `PATH` in login shells, the deploy check will warn.
+   `java -version`. `pux4j` runs whichever `java` comes first on the `PATH` (`JAVA_HOME` is
+   ignored). The deploy check looks in a non-interactive `ssh` shell and warns if it finds no Java
+   25 there; a JDK that is only put on the `PATH` in login shells triggers that warning, though
+   you can still run the apps from a login shell on the Pi.
 2. **SPI and I2C enabled.** Both are off by default. Follow the Raspberry Pi documentation:
    [Enable or disable SPI](https://www.raspberrypi.com/documentation/computers/configuration.html#spi) and
    [Enable or disable I2C](https://www.raspberrypi.com/documentation/computers/configuration.html#i2c)
@@ -82,7 +87,8 @@ A Pi bundle is the directory `pux4j-launcher/target/pux4j/`. It is rebuilt from 
 so building the other HAT's bundle replaces it. Build, deploy, then build the other.
 
 Nothing else runs a build for you: the run and deploy scripts only run and copy what the last
-build produced. After you change sources, build again.
+build produced. After you change sources, build again. The emulator bundle (`mvn install`) and a
+Pi bundle (`-Pbundle-hat-...`) are separate outputs; building one does not refresh the other.
 
 ---
 
@@ -174,7 +180,7 @@ the directory exists), use `~/bin/pux4j` or `~/applications/pux4j/bin/pux4j`.
 line up with what is drawn and that the display is the right way up. It writes
 `validation-report-<timestamp>.txt` into the directory you ran it from. Options, passed after the
 name: `--start-step <n>` (jump to a step), `--scenario-count <n>` or `--all-scenarios` (how many
-scenarios to run; the default is the first two), `--notes "text"` (recorded in the report), and the
+scenarios to run; the default is all of them), `--notes "text"` (recorded in the report), and the
 overrides `--display <driver>`, `--touch <driver>` and `--orientation <LANDSCAPE|LANDSCAPE_INVERTED|...>`
 for non-standard setups. Any other option is rejected with "Unknown argument".
 
@@ -183,6 +189,7 @@ for non-standard setups. Any other option is rejected with "Unknown argument".
 4-gray waveform order, default `SPLIT_FLASH`). Everything else after the app name goes to the app
 (the JavaFX apps ignore it; `smoke` and `validation` take it as their own options).
 Exit codes: 0 success, 1 failure, 2 usage error (unknown or missing app name).
+Stop an app with Ctrl-C; the panel is put to sleep on the way out and the last log lines are kept.
 
 ### DISPLAY and the desktop session
 
