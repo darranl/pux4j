@@ -30,7 +30,7 @@ builds against 23.0.1 and this machinery is long-standing. What happens *before*
   ancestors' `onMouseEntered` handlers do not fire for a child.
 - **Click.** `MOUSE_CLICKED` is fired at the deepest common ancestor of the press and release
   hierarchies (which includes the `Scene`). There is **no distance cutoff**. The toolkit's
-  multi-click distance/time only drive `clickCount` and `stillSincePress`.
+  multi-click distance/time drive `clickCount`, `stillSincePress` and the drag hysteresis.
 - **Drag detection.** `DRAG_DETECTED` is fired once per gesture at the press target, on the first
   drag where |dx| or |dy| from the press point exceeds the toolkit's drag hysteresis (per axis, not
   a straight-line distance). A handler can suppress it with `setDragDetect(false)`/force it with
@@ -185,7 +185,7 @@ Monocle `:hover` stays set after the lift (no pointer-leave is sent); the bridge
 |---|---|
 | No `MouseDragEvent`/drag-and-drop | Only produced by the internal `Scene` mouse handler (D2); no public equivalent. |
 | No gesture events, no `ContextMenuEvent` | Platform-generated, not scene behaviour; designing recognisers/timers is out of proportion until an app needs one (D3). |
-| Multi-click time/distance are fixed Monocle-derived defaults, not toolkit values | The bridge runs without a toolkit/stage. |
+| Multi-click time/distance, and so the drag hysteresis, are fixed Monocle-derived defaults (500 ms / 20 px), not toolkit values | The bridge runs without a stage, and the toolkit's values are desktop settings (GTK 5 px by default, 25 px under Raspberry Pi OS's theme); a panel must behave the same on every host. |
 | `MOUSE_EXITED_TARGET` chain after `MOUSE_CLICKED` | A touch surface has no pointer to leave; Monocle leaves `:hover` set. |
 | Small moves are suppressed | Monocle does the same (`SmallMoveTouchFilter`); on e-ink each drag event can cost a refresh. |
 | `:pressed` not cleared on a node removed mid-gesture | Setter is internal; see the table. |
@@ -243,7 +243,8 @@ The **mouse** oracle feeds the second scene through `SceneHelper.processMouseEve
 trace is rewritten for the documented deviations above (no re-pick, re-entering at the press, the
 exit click count) and then compared exactly, including target path, scene position, button state
 and `clickCount`; `stillSincePress` is not compared because the toolkit's multi-click distance and
-time come from the desktop (400 ms / 5 px under GTK) while the bridge uses Monocle's 500 ms / 20 px.
+time come from the desktop (under GTK, `gtk-double-click-time` / `gtk-double-click-distance`: 400 ms / 5 px by default, but theme-dependent; Raspberry Pi OS's default theme sets 25 px) while the bridge uses Monocle's 500 ms / 20 px.
+The same toolkit distance is `Scene`'s drag hysteresis, so the oracle scene pins the drag-detect default to the bridge's 20 px rule with a `setDragDetect` filter; the position of `DRAG_DETECTED` is therefore compared against the bridge's rule, and its order, target and once-only firing against JavaFX.
 Its `Timeline`-based multi-click timeout never fires inside one FX turn, so the double tap compares
 counts only because both sides count up. It needs
 `--add-exports javafx.graphics/com.sun.javafx.scene=<test module>` in the compiler's test-compile

@@ -30,8 +30,12 @@ final class ContactSet {
     /** A move whose straight-line distance from the last passed-on position is below this is
      * dropped (Monocle's {@code touchRadius}); each reported move can cost an e-ink refresh. */
     static final double DEAD_BAND_PX = 20.0;
-    /** Per-axis distance for click counting, {@code stillSincePress} and the drag-detect default
-     * (Monocle's multi-click distance). */
+    /** Per-axis distance for click counting, {@code stillSincePress} and the drag-detect default:
+     * {@code DRAG_DETECTED} is due on the first move strictly more than this from the mouse press
+     * on either axis. Fixed (Monocle's multi-click distance, also JavaFX's headless platform's),
+     * deliberately not the toolkit's {@code getMultiClickMaxX/Y}: that value comes from the desktop
+     * (GTK's {@code gtk-double-click-distance}: 5 by default, 25 under Raspberry Pi OS's default
+     * theme), and a panel's behaviour must not depend on the desktop the JVM happens to run on. */
     static final double MULTI_CLICK_PX = 20.0;
     static final long MULTI_CLICK_NANOS = 500_000_000L;
     /** A reading farther than this plus {@link #MAX_SPEED_PX_PER_MS} times the time since the

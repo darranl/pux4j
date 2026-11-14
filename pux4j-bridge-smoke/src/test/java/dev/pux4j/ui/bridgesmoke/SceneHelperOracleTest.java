@@ -49,6 +49,26 @@ class SceneHelperOracleTest {
         return new Pane(a, b);
     }
 
+    /** The bridge's drag-detect distance (per axis, strictly more than); see {@code ContactSet.MULTI_CLICK_PX}. */
+    private static final double BRIDGE_DRAG_HYSTERESIS_PX = 20.0;
+
+    /**
+     * Sets the drag-detect default of the oracle scene to the bridge's rule, so the position of
+     * {@code DRAG_DETECTED} does not depend on the desktop's multi-click distance (see
+     * {@link #withDocumentedDeviations}). The real {@code Scene} still decides when it fires
+     * relative to the drag, at which target, and that it fires once.
+     */
+    private static void pinDragDetectToBridgeRule(Scene s) {
+        double[] press = new double[2];
+        s.addEventFilter(MouseEvent.MOUSE_PRESSED, e -> {
+            press[0] = e.getSceneX();
+            press[1] = e.getSceneY();
+        });
+        s.addEventFilter(MouseEvent.MOUSE_DRAGGED, e -> e.setDragDetect(
+                Math.abs(e.getSceneX() - press[0]) > BRIDGE_DRAG_HYSTERESIS_PX
+                        || Math.abs(e.getSceneY() - press[1]) > BRIDGE_DRAG_HYSTERESIS_PX));
+    }
+
     private void compare(Gesture gesture) throws Exception {
         List<Trace.Entry> bridge;
         try (BridgeFixture f = BridgeFixture.open(out, SceneHelperOracleTest::scene)) {
@@ -62,6 +82,7 @@ class SceneHelperOracleTest {
             root.layout();
             Trace t = new Trace();
             t.install(s);
+            pinDragDetectToBridgeRule(s);
             for (Gesture.Step step : gesture.steps) {
                 switch (step.kind()) {
                     case PRESS -> {
@@ -96,6 +117,13 @@ class SceneHelperOracleTest {
      *       would not exit and re-enter at all; this is the cost of the exit-after-lift rule.)</li>
      *   <li><b>Exit events after a lift</b> are derived from the release, so they carry its click count
      *       (JavaFX gives enter/exit events a click count of 0).</li>
+     *   <li><b>Drag hysteresis.</b> Not a rewrite: the oracle scene carries a filter that sets the
+     *       drag-detect default on each {@code MOUSE_DRAGGED} to the bridge's rule (strictly more than
+     *       20 px from the press on either axis) through the public {@code setDragDetect}. JavaFX's own
+     *       default uses the toolkit's multi-click distance, which is a desktop setting (GTK: 5 px by
+     *       default, 25 px under Raspberry Pi OS's default theme), so without the filter the position
+     *       of {@code DRAG_DETECTED} would depend on the machine. The real {@code Scene} still decides
+     *       when it fires relative to the drag, at which target, and that it fires once.</li>
      * </ul>
      */
     private static List<Trace.Entry> withDocumentedDeviations(List<Trace.Entry> oracle) {
@@ -169,5 +197,11 @@ class SceneHelperOracleTest {
     @Test void dragAcrossSiblings() throws Exception { compare(Gesture.press(50, 40).dragTo(160, 40).release()); }
     @Test void dragOffAndReleaseElsewhere() throws Exception { compare(Gesture.press(50, 40).dragTo(200, 100).release()); }
     @Test void pressOffAndDragOnto() throws Exception { compare(Gesture.press(200, 100).dragTo(50, 40).release()); }
+    // Click counting cannot be pinned like the drag-detect default: the real Scene computes clickCount
+    // itself, from the toolkit's multi-click distance and time (a desktop setting: GTK 5 px / 400 ms by
+    // default, 25 px under Raspberry Pi OS's default theme), while the bridge uses a fixed 500 ms / 20 px.
+    // So an oracle case that depends on click counting must keep its taps clearly outside that band: the
+    // same spot (or within 2 px) to continue a count, more than 30 px apart to restart it. A tap 5-25 px
+    // from the previous one gives a different count per desktop and would fail on some machines.
     @Test void doubleTap() throws Exception { compare(Gesture.tap(50, 40).then(Gesture.tap(50, 40))); }
 }
