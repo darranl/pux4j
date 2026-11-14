@@ -105,7 +105,10 @@ WARNING: sun.misc.Unsafe::allocateMemory will be removed in a future release
 
 They come from JavaFX's own renderer, not from `pux4j`. On a Raspberry Pi the log also shows Pi4J
 detecting the board (for example `Detected board model: Raspberry Pi 500+`) even though the emulator is
-in use; that is normal. A real problem shows as an `ERROR` line, or as the app failing to start.
+in use; that is normal. On a PC that is not a Raspberry Pi, Pi4J instead logs `ERROR` lines about
+not finding the board (`Could not get the board name`, `No suitable user group present for provider`,
+followed by a `Pi4JException`); these are expected there and the emulator carries on. Otherwise a real
+problem shows as an `ERROR` line, or as the app failing to start.
 
 ---
 
