@@ -49,7 +49,7 @@ done
 
 exec java \
   --module-path "$MODULE_PATH" \
-  --enable-native-access=javafx.graphics \
+  --enable-native-access=javafx.graphics,com.pi4j.plugin.ffm \
   ${JVM_ARGS[@]+"${JVM_ARGS[@]}"} \
   -m dev.pux4j.ui.launcher/dev.pux4j.ui.launcher.EInkLauncher \
   ${APP_ARGS[@]+"${APP_ARGS[@]}"}

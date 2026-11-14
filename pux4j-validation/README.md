@@ -42,6 +42,11 @@ pux4j validation
 Options after the app name go to the test. `-D...` arguments are JVM properties and are handled by
 the launcher.
 
+**A warning you can ignore.** When `validation` reaches step 7 it logs
+`WARN ... PNG icon not found: icons/apple.png (falling back to drawn shape)`. The apple on that screen is
+always drawn as a shape rather than from a picture, so the step works normally and its result is not
+affected. Any other `WARN` or `ERROR` line is worth a look.
+
 ## Available tests
 
 ### 1) DisplaySmokeTest (`smoke`)
