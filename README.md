@@ -42,12 +42,15 @@ see [Run the JavaFX apps directly](#run-the-javafx-apps-directly).
 
 `pux4j` is built with [Maven](https://maven.apache.org/), a Java build tool. There are three ways to use it:
 
-1. **Try it in the emulator.** On an x86_64 Linux machine with Java 25 and Maven. No Raspberry Pi and no
-   HAT are needed. Start here: [Try it: run the emulator](#try-it-run-the-emulator).
+1. **Try it in the emulator.** On a Linux machine with Java 25 and Maven and a desktop session: x86_64
+   (tested on Arch Linux) or a Raspberry Pi with the desktop (tested on a Pi 500+). No HAT is needed.
+   Start here: [Try it: run the emulator](#try-it-run-the-emulator).
 2. **Build on an x86_64 machine and deploy to a Raspberry Pi.** Any x86_64 Linux computer can be the
    *build machine*: it builds the software and copies it to the Pi over `ssh`. This is the way documented
    from [Supported hardware](#supported-hardware) onwards.
-3. **Build and run entirely on the Raspberry Pi.** Planned, but not yet documented or tested.
+3. **Build and run entirely on the Raspberry Pi.** The emulator works there as in way 1 (see
+   [Try it: run the emulator](#try-it-run-the-emulator)), and a Pi bundle you build on the Pi is installed
+   there with `scripts/install-local.sh`: [Install on the Raspberry Pi you build on](#install-on-the-raspberry-pi-you-build-on).
 
 The same apps can also be built as **native images**: programs compiled ahead of time so that they start
 without a Java runtime. That lives in the separate [`pux4j-native`](https://github.com/darranl/pux4j-native)
@@ -57,13 +60,22 @@ project, which builds on the results of this one.
 
 ## Try it: run the emulator
 
-No hardware needed. The emulator is selected automatically on any machine that is not a Raspberry Pi.
-Mouse press and release stand in for touching the panel.
+No hardware needed. The emulator shows the panel as a window on your desktop, and mouse press and
+release stand in for touching it. The emulator bundle that `mvn install` builds contains no HAT driver,
+so the emulator is the driver that gets selected, on a Raspberry Pi as well as on any other machine.
 
-**You need:** Java 25 (any JDK 25 distribution) and Maven (3.9 and 3.10 tested), on an x86_64 Linux
-machine (tested on Arch Linux). The first build downloads the dependencies from Maven Central, so it
-needs network access and takes a few minutes. Some JavaFX tests are skipped when there is no display,
-and Pi4J logs a "no suitable user group" error line in some tests on a build machine; both are expected.
+**You need:** Java 25 (any JDK 25 distribution) and Maven (3.9 and 3.10 tested), on a Linux machine
+(tested on Arch Linux x86_64 and on a Raspberry Pi 500+ running Raspberry Pi OS 12, aarch64). The first
+build downloads the dependencies from Maven Central, so it needs network access and takes a few minutes.
+
+**An interactive desktop session is required.** The emulator draws a window, so run it from a terminal
+inside the desktop you are looking at. Over a plain `ssh` login there is no window to show it in and the
+app fails with `Unable to open DISPLAY` (see [DISPLAY and the desktop session](#display-and-the-desktop-session)).
+This applies on a Raspberry Pi too: run it from a terminal in the Pi's own desktop session.
+
+Some JavaFX tests are skipped when there is no display, and Pi4J logs a "no suitable user group" error line
+in some tests on a build machine; both are expected. `mvn install -Dpux4j.fxTests.required=true` makes a
+skipped JavaFX test a failure instead, which is the way to be sure they ran.
 
 All commands run from the root of the `pux4j` repository.
 
@@ -80,6 +92,20 @@ pux4j-bundle/run-emulator.sh validation       # interactive display + touch test
 Java libraries (jars) the apps need. The script only runs what the last build left; it never builds. After
 you change sources, build again. To emulate the other panel, or to change the window size, see
 [More on the emulator](#more-on-the-emulator).
+
+**Warnings you can ignore.** The JVM prints some `WARNING:` lines when a JavaFX app starts. They do not
+affect the app:
+
+```
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::allocateMemory has been called by com.sun.marlin.OffHeapArray (file:...)
+WARNING: Please consider reporting this to the maintainers of class com.sun.marlin.OffHeapArray
+WARNING: sun.misc.Unsafe::allocateMemory will be removed in a future release
+```
+
+They come from JavaFX's own renderer, not from `pux4j`. On a Raspberry Pi the log also shows Pi4J
+detecting the board (for example `Detected board model: Raspberry Pi 500+`) even though the emulator is
+in use; that is normal. A real problem shows as an `ERROR` line, or as the app failing to start.
 
 ---
 
@@ -186,7 +212,10 @@ mvn package -DskipTests -Pbundle-hat-2in13v4  # Pi bundle for the 2.13" V4 HAT (
 ```
 
 A Pi bundle is the directory `pux4j-bundle/target/pux4j/`. It is rebuilt from scratch each time,
-so building the other HAT's bundle replaces it. Build, deploy, then build the other.
+so building the other HAT's bundle replaces it. Build, deploy (or install), then build the other.
+
+Build on a build machine and then [deploy](#deploy-to-a-raspberry-pi) over `ssh`, or build on the Pi itself
+and [install locally](#install-on-the-raspberry-pi-you-build-on). The build command is the same either way.
 
 Nothing else runs a build for you: the run and deploy scripts only run and copy what the last
 build produced. After you change sources, build again. The emulator bundle (`mvn install`) and a
@@ -195,6 +224,10 @@ Pi bundle (`-Pbundle-hat-...`) are separate outputs; building one does not refre
 ---
 
 ## Deploy to a Raspberry Pi
+
+For when you build on **another computer** (the build machine) and copy the result to the Pi over `ssh`.
+If you build on the Pi itself, use [Install on the Raspberry Pi you build on](#install-on-the-raspberry-pi-you-build-on)
+instead.
 
 ```bash
 mvn package -DskipTests -Pbundle-hat-2in9v2     # the bundle that matches the HAT on that Pi
@@ -214,6 +247,35 @@ The script does not build anything. It prints which HAT the bundle was built for
    stream over `ssh`. The `logs/` directory is kept;
 3. runs `bin/install.sh` on the Pi, which creates `~/bin` if it does not exist and links `pux4j`
    into it. It does not edit any shell profile and does not use `sudo`.
+
+---
+
+## Install on the Raspberry Pi you build on
+
+For when you check out `pux4j`, build and run **all on the Pi**. There is no host and no `ssh`: the script
+copies the bundle you just built into your own home directory. Run everything from a terminal on the Pi;
+the commands are the same ones as in [Build for a Raspberry Pi](#build-for-a-raspberry-pi) and
+[What you need for a Raspberry Pi](#what-you-need-for-a-raspberry-pi), with the build tools (Java 25 and
+Maven) installed on the Pi as well.
+
+```bash
+mvn package -DskipTests -Pbundle-hat-2in9v2     # the bundle that matches the HAT on this Pi
+scripts/install-local.sh
+```
+
+Options: `--dir <dir>` (the directory that will contain the `pux4j` directory; default `applications`,
+relative to your home directory) and `--dry-run` (print what it would do; nothing is copied).
+`scripts/install-local.sh --help` shows them.
+
+The script does not build anything. It prints which HAT the bundle was built for and then does what
+[deploy](#deploy-to-a-raspberry-pi) does, on this machine: read-only checks that **warn** about a missing
+Java 25, SPI, I2C or `tar`; replaces the bundle's `lib/`, `bin/`, `conf/` and `byteman/` directories (the
+old ones are replaced only after the copy succeeded, and `logs/` is kept); and runs `bin/install.sh`, which
+links `pux4j` into `~/bin`.
+
+The emulator is separate: `mvn install` and `pux4j-bundle/run-emulator.sh` as in
+[Try it: run the emulator](#try-it-run-the-emulator). A Pi bundle holds the HAT driver and no emulator, so
+the same checkout gives you both, built and run separately.
 
 ---
 
@@ -256,7 +318,8 @@ Stop an app with Ctrl-C; the panel is put to sleep on the way out and the last l
 ### DISPLAY and the desktop session
 
 The JavaFX apps need a desktop session on the Pi, and the `DISPLAY` environment variable must
-name it. `pux4j` defaults `DISPLAY` to `:0`. Over a plain `ssh` login `DISPLAY` is not set, and the
+name it. (The emulator needs the same, and also needs you to be looking at that session, since it draws
+its window there; the apps on a HAT draw nothing on the desktop session.) `pux4j` defaults `DISPLAY` to `:0`. Over a plain `ssh` login `DISPLAY` is not set, and the
 right value depends on the session, so **you may need to find your own**. Ways to find it:
 
 ```bash
@@ -312,7 +375,16 @@ Each profile fixes the panel's size, its mounting orientation and the pixel form
 so the emulated window matches the real HAT: the 2.9" profile has 4-gray, the 2.13" profile is
 monochrome only.
 
-What the emulator does not do:
+### Emulator and HAT are separate bundles
+
+The emulator and a HAT driver are never in the same bundle, on purpose. The emulator bundle
+(`mvn install`, run with `run-emulator.sh`) holds the emulator and no HAT driver. A Pi bundle
+(`-Pbundle-hat-...`, run with `pux4j`) holds one HAT's driver and no emulator. So on a Raspberry Pi with a
+HAT attached, `run-emulator.sh` shows the app in a window and `pux4j` drives the panel, from the same
+checkout, and neither can pick up the other's driver. Both are built from the same source by the commands
+above; build the one you want to run.
+
+### What the emulator does not do
 
 - **Only these two panels exist.** There is no option for another size. A new panel needs a new
   entry in the emulator's profile list in `pux4j-emulator`.
