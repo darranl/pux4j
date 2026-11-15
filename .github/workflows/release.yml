@@ -1,0 +1,80 @@
+name: Release
+
+# Manually dispatched. Runs release:prepare and release:perform on an ephemeral runner, so no
+# release.properties or pom.xml.releaseBackup files are left in anybody's checkout. The plugin
+# commits the release version, tags it (bare version, no prefix), commits the next SNAPSHOT and
+# pushes all three to main; release:perform then deploys the tagged build to GitHub Packages.
+
+on:
+  workflow_dispatch:
+    inputs:
+      releaseVersion:
+        description: 'Release version (blank: the current version without -SNAPSHOT)'
+        required: false
+      developmentVersion:
+        description: 'Next development version (blank: the next patch, with -SNAPSHOT)'
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # Only from main, and only after the owner approves the "release" environment.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # A token allowed to push to main past the branch ruleset (bypass actor).
+          token: ${{ secrets.RELEASE_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Set up Java 25 (with GitHub Packages auth)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+          server-id: github
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_TOKEN
+
+      - name: Install the JavaFX toolkit's runtime libraries and a virtual display
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libxtst6 libxxf86vm1
+
+      - name: Prepare the release (verify, tag, bump to the next SNAPSHOT, push)
+        # The checkout's https credentials are used for the push, so the plugin's ssh
+        # developerConnection (used for local runs) is replaced here.
+        run: |
+          args=(--batch-mode -DdeveloperConnectionUrl=scm:git:https://github.com/${{ github.repository }}.git)
+          [ -n "${{ inputs.releaseVersion }}" ]     && args+=(-DreleaseVersion=${{ inputs.releaseVersion }})
+          [ -n "${{ inputs.developmentVersion }}" ] && args+=(-DdevelopmentVersion=${{ inputs.developmentVersion }})
+          xvfb-run -a mvn "${args[@]}" release:prepare
+
+      - name: Perform the release (deploy the tagged build to GitHub Packages)
+        run: mvn --batch-mode release:perform -Darguments=-DskipTests
+        env:
+          MAVEN_USERNAME: ${{ github.actor }}
+          MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the GitHub release
+        run: |
+          tag=$(grep '^scm.tag=' release.properties | cut -d= -f2)
+          echo "Releasing tag ${tag}"
+          gh release create "${tag}" --title "${tag}" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
