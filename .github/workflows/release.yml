@@ -61,6 +61,15 @@ jobs:
           [ -n "${{ inputs.developmentVersion }}" ] && args+=(-DdevelopmentVersion=${{ inputs.developmentVersion }})
           xvfb-run -a mvn "${args[@]}" release:prepare
 
+      - name: Record the release tag
+        # release:perform deletes release.properties when it succeeds, so read the tag now.
+        id: tag
+        run: |
+          tag=$(grep '^scm.tag=' release.properties | cut -d= -f2)
+          [ -n "${tag}" ] || tag=$(git tag --points-at HEAD~1 | head -n1)
+          [ -n "${tag}" ] || { echo "::error::Could not determine the release tag"; exit 1; }
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
       - name: Perform the release (deploy the tagged build to GitHub Packages)
         run: mvn --batch-mode release:perform -Darguments=-DskipTests
         env:
@@ -68,9 +77,7 @@ jobs:
           MAVEN_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create the GitHub release
-        run: |
-          tag=$(grep '^scm.tag=' release.properties | cut -d= -f2)
-          echo "Releasing tag ${tag}"
-          gh release create "${tag}" --title "${tag}" --generate-notes
+        run: gh release create "${TAG}" --title "${TAG}" --generate-notes
         env:
+          TAG: ${{ steps.tag.outputs.tag }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
