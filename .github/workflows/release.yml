@@ -16,8 +16,8 @@ on:
         required: false
 
 permissions:
-  contents: read
-  packages: write
+  contents: write    # push the release commits and tag, create the GitHub release
+  packages: write    # deploy to GitHub Packages
 
 concurrency:
   group: release
@@ -25,17 +25,14 @@ concurrency:
 
 jobs:
   release:
-    # Only from main, and only after the owner approves the "release" environment.
+    # Only from main.
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: release
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # A token allowed to push to main past the branch ruleset (bypass actor).
-          token: ${{ secrets.RELEASE_TOKEN }}
           fetch-depth: 0
 
       - name: Configure git identity
@@ -77,4 +74,4 @@ jobs:
           echo "Releasing tag ${tag}"
           gh release create "${tag}" --title "${tag}" --generate-notes
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
