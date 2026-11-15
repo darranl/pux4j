@@ -1,0 +1,43 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Install the JavaFX toolkit's runtime libraries and a virtual display
+        # The JavaFX bridge tests need a real toolkit. Without a display they abort (assumption
+        # failure) and the build still succeeds, so a display is provided and checked below.
+        run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libxtst6 libxxf86vm1
+
+      - name: Build and test
+        run: xvfb-run -a mvn --batch-mode verify
+
+      - name: Check the JavaFX bridge tests really ran
+        run: |
+          ran=$(cat pux4j-bridge-smoke/target/surefire-reports/TEST-*.xml \
+                | grep -o '<testsuite [^>]*' | grep -o ' tests="[0-9]*"' \
+                | grep -o '[0-9]*' | awk '{n+=$1} END {print n+0}')
+          echo "JavaFX bridge tests run: ${ran:-0}"
+          if [ "${ran:-0}" -lt 1 ]; then
+            echo "::error::No JavaFX bridge tests ran: the toolkit did not start, so they aborted instead of failing."
+            exit 1
+          fi
