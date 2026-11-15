@@ -16,7 +16,7 @@
 
     <scm>
         <connection>scm:git:https://github.com/pux4j/pux4j.git</connection>
-        <developerConnection>scm:git:git@github.com:pux4j/pux4j.git</developerConnection>
+        <developerConnection>scm:git:https://github.com/pux4j/pux4j.git</developerConnection>
         <url>https://github.com/pux4j/pux4j</url>
         <tag>HEAD</tag>
     </scm>

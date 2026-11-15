@@ -54,10 +54,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y xvfb libgtk-3-0 libxtst6 libxxf86vm1
 
       - name: Prepare the release (verify, tag, bump to the next SNAPSHOT, push)
-        # The checkout's https credentials are used for the push, so the plugin's ssh
-        # developerConnection (used for local runs) is replaced here.
+        # The push uses the checkout's https credentials, which is why the pom's developerConnection is https.
         run: |
-          args=(--batch-mode -DdeveloperConnectionUrl=scm:git:https://github.com/${{ github.repository }}.git)
+          args=(--batch-mode)
           [ -n "${{ inputs.releaseVersion }}" ]     && args+=(-DreleaseVersion=${{ inputs.releaseVersion }})
           [ -n "${{ inputs.developmentVersion }}" ] && args+=(-DdevelopmentVersion=${{ inputs.developmentVersion }})
           xvfb-run -a mvn "${args[@]}" release:prepare
