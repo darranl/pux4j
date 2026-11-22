@@ -5,7 +5,7 @@
     <parent>
         <groupId>dev.pux4j.ui</groupId>
         <artifactId>pux4j</artifactId>
-        <version>0.1.2</version>
+        <version>0.1.2-SNAPSHOT</version>
     </parent>
 
     <artifactId>pux4j-core</artifactId>
