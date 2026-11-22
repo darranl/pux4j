@@ -2,6 +2,7 @@
 package dev.pux4j.ui.core;
 
 import dev.pux4j.ui.core.internal.CapturingDisplayDriver;
+import dev.pux4j.ui.core.internal.DisplayDriverDecorator;
 
 import org.slf4j.LoggerFactory;
 
@@ -37,8 +38,8 @@ public final class ScreenshotCapture {
         if (dir == null || dir.isBlank()) {
             return driver;
         }
-        if (driver instanceof CapturingDisplayDriver) {
-            return driver;   // already capturing: a second decorator would overwrite its files
+        if (DisplayDriverDecorator.chainContains(driver, CapturingDisplayDriver.class)) {
+            return driver;   // already capturing somewhere in the chain: a second one would overwrite its files
         }
         try {
             return new CapturingDisplayDriver(driver, Path.of(dir), System.getProperty(PREFIX_PROPERTY, "screen"));

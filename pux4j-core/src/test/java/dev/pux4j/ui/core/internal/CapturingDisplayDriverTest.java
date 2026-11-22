@@ -243,4 +243,42 @@ class CapturingDisplayDriverTest {
         cap.close();
         cap.close();   // a second close must not throw
     }
+
+    @Test
+    void resetStillClearsThroughAnotherDecorator(@TempDir Path tmp) throws Exception {
+        Path oracle = tmp.resolve("oracle");
+        EInkDisplayDriver png = DisplayDriverFactory.select("png").create(null, DriverConfig.builder()
+            .property("width", W).property("height", H)
+            .property("orientation", "LANDSCAPE").property("outputDir", oracle.toString()).build());
+        // The markers decorator sits between the capture and the PNG driver, as in the bridge.
+        try (var cap = new CapturingDisplayDriver(
+                dev.pux4j.ui.core.FirstFrameMarkers.wrap(png), tmp.resolve("shots"), "s")) {
+            cap.writeFrame(frame(0x00, W, H)).get();
+            cap.reset();
+            cap.writeRegion(0, 0, 8, 8, frame(0xFF, 8, 8)).get();
+        }
+        List<Path> got = pngs(tmp.resolve("shots")), expected = pngs(oracle);
+        assertEquals(2, got.size());
+        for (int i = 0; i < 2; i++) {
+            assertArrayEquals(Files.readAllBytes(expected.get(i)), Files.readAllBytes(got.get(i)));
+        }
+    }
+
+    @Test
+    void prewrappedChainsAreNotWrappedAgainInEitherOrder(@TempDir Path tmp) throws Exception {
+        System.setProperty(ScreenshotCapture.DIR_PROPERTY, tmp.resolve("s").toString());
+        try {
+            EInkDisplayDriver base = new Recorder(tmp.resolve("o"));
+            // capture outside markers, then the bridge's own wrapping order applied on top
+            EInkDisplayDriver chain = ScreenshotCapture.wrap(dev.pux4j.ui.core.FirstFrameMarkers.wrap(base));
+            assertSame(chain, ScreenshotCapture.wrap(dev.pux4j.ui.core.FirstFrameMarkers.wrap(chain)));
+            // markers outside capture
+            EInkDisplayDriver other = dev.pux4j.ui.core.FirstFrameMarkers.wrap(ScreenshotCapture.wrap(base));
+            assertSame(other, ScreenshotCapture.wrap(dev.pux4j.ui.core.FirstFrameMarkers.wrap(other)));
+            ((AutoCloseable) chain).close();
+            ((AutoCloseable) other).close();
+        } finally {
+            System.clearProperty(ScreenshotCapture.DIR_PROPERTY);
+        }
+    }
 }

@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * carries {@code epochMs}, the wall-clock time in milliseconds, so it can be compared with a
  * {@code date +%s%3N} taken before launch. Everything else is forwarded unchanged.
  */
-public final class FirstFrameMarkersDriver implements EInkDisplayDriver, AutoCloseable {
+public final class FirstFrameMarkersDriver implements DisplayDriverDecorator, AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(FirstFrameMarkersDriver.class);
 
@@ -32,6 +32,7 @@ public final class FirstFrameMarkersDriver implements EInkDisplayDriver, AutoClo
         this.delegate = delegate;
     }
 
+    @Override public EInkDisplayDriver wrapped() { return delegate; }
     @Override public int getWidth() { return delegate.getWidth(); }
     @Override public int getHeight() { return delegate.getHeight(); }
     @Override public Orientation getOrientation() { return delegate.getOrientation(); }

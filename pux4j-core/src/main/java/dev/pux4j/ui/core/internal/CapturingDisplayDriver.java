@@ -35,7 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * and it means the caller may reuse its frame arrays); rotation, encoding and the file write run
  * on one worker thread, so display timing is not affected. Capture errors are logged, never thrown.
  */
-public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoCloseable {
+public final class CapturingDisplayDriver implements DisplayDriverDecorator, AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(CapturingDisplayDriver.class);
 
@@ -102,6 +102,7 @@ public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoClos
         log.info("Capturing screenshots to {} as {}-NNNN.png", outputDir, prefix);
     }
 
+    @Override public EInkDisplayDriver wrapped() { return delegate; }
     @Override public int getWidth() { return delegate.getWidth(); }
     @Override public int getHeight() { return delegate.getHeight(); }
     @Override public Orientation getOrientation() { return delegate.getOrientation(); }
@@ -112,7 +113,7 @@ public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoClos
     // driver is the exception: its reset clears its retained buffer to white, and so does this one.
     @Override public void reset() {
         delegate.reset();
-        if (delegate instanceof PngEInkDisplay) {
+        if (DisplayDriverDecorator.chainContains(delegate, PngEInkDisplay.class)) {
             synchronized (this) { Arrays.fill(buffer, 0xFFFFFFFF); }
         }
     }

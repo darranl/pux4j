@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package dev.pux4j.ui.core;
 
+import dev.pux4j.ui.core.internal.DisplayDriverDecorator;
 import dev.pux4j.ui.core.internal.FirstFrameMarkersDriver;
 
 /**
@@ -16,8 +17,8 @@ public final class FirstFrameMarkers {
 
     /** Returns {@code driver} wrapped to log the first-frame markers. */
     public static EInkDisplayDriver wrap(EInkDisplayDriver driver) {
-        if (driver instanceof FirstFrameMarkersDriver) {
-            return driver;   // already marked: a second decorator would log the markers twice
+        if (DisplayDriverDecorator.chainContains(driver, FirstFrameMarkersDriver.class)) {
+            return driver;   // already marked somewhere in the chain: a second one would log the markers twice
         }
         return new FirstFrameMarkersDriver(driver);
     }
