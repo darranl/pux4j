@@ -355,11 +355,21 @@ java.lang.UnsupportedOperationException: Unable to open DISPLAY
   tracing: the rule files are in the bundle's `byteman/` directory, the ByteMan agent jar is not
   shipped. `pux4j --help` shows an example.
 - Pull a log back to the build machine with `scp <host>:applications/pux4j/logs/demo.log .`.
+- `-Dpux4j.screenshots=<dir>` saves a PNG of every distinct frame the app displays, in on-screen
+  orientation, as `<app>-NNNN.png` (for example `PUX4J_JAVA_OPTS="-Dpux4j.screenshots=$HOME/shots" pux4j demo`).
+  It works with the emulator and the HAT drivers, including a bridge built with `EInkBridge.builder()`, and in native images where the option can be passed
+  at run time. It records what the driver was asked to show, not what the panel does with it. It adds
+  some load, so leave it off when timing a start-up. At most 16 captured frames wait for the writer
+  (`-Dpux4j.screenshots.queue=<n>` changes that); beyond that a capture is dropped with a warning and
+  the file numbers show a gap.
+  Captures from several bridges in one run share one numbering, so nothing is overwritten; a second run
+  into the same directory does overwrite, so use a fresh directory for each run.
 - Every app logs two INFO lines for the first frame it sends to the display:
   `first-frame-handed epochMs=<ms>` (the write reached the driver) and
   `first-frame-written epochMs=<ms> writeMs=<ms>` (it completed; on a real panel that is after the
   refresh). `epochMs` is the wall-clock time in milliseconds, so a script can take `date +%s%3N` before
   launching and subtract it, which separates start-up time from the panel refresh time.
+  This also applies to a bridge built with `EInkBridge.builder()`.
 
 ---
 
@@ -400,6 +410,12 @@ above; build the one you want to run.
   panel are not simulated; check those on hardware.
 - **Touch is a straight mapping** from mouse position to panel coordinates, so the emulator cannot
   catch a wrong touch calibration on a real HAT. Use `validation` on the hardware for that.
+
+### Screenshots
+
+`pux4j-bundle/run-emulator.sh --screenshots <dir> <app>` (or `-Dpux4j.screenshots=<dir>`) writes one PNG per
+distinct screen shown, named after the app, so click through the app and collect the pictures.
+`-Dpux4j.screenshots.prefix=<name>` changes the file name prefix. See also "Logs and tracing".
 
 ### Headless checks
 

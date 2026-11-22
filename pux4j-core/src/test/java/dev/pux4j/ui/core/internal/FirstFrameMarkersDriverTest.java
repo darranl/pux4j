@@ -83,6 +83,12 @@ class FirstFrameMarkersDriverTest {
     }
 
     @Test
+    void wrappingAnAlreadyMarkedDriverReturnsItUnchanged() {
+        EInkDisplayDriver once = FirstFrameMarkers.wrap(new Stub());
+        org.junit.jupiter.api.Assertions.assertSame(once, FirstFrameMarkers.wrap(once));
+    }
+
+    @Test
     void writtenIsLoggedOnlyWhenTheWriteCompletes() throws Exception {
         Stub stub = new Stub();
         stub.next = new CompletableFuture<>();

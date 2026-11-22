@@ -16,6 +16,9 @@ public final class FirstFrameMarkers {
 
     /** Returns {@code driver} wrapped to log the first-frame markers. */
     public static EInkDisplayDriver wrap(EInkDisplayDriver driver) {
+        if (driver instanceof FirstFrameMarkersDriver) {
+            return driver;   // already marked: a second decorator would log the markers twice
+        }
         return new FirstFrameMarkersDriver(driver);
     }
 }

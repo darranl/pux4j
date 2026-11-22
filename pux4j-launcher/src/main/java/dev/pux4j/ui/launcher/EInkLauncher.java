@@ -84,6 +84,10 @@ public final class EInkLauncher {
             return selection.exitCode();
         }
         AppEntry app = selection.entry();
+        if (System.getProperty("pux4j.screenshots") != null
+                && System.getProperty("pux4j.screenshots.prefix") == null) {
+            System.setProperty("pux4j.screenshots.prefix", app.name());
+        }
         try {
             if (app.kind() == AppEntry.Kind.DRIVER) {
                 return DriverAppRunner.run((DriverApp) app.source(), selection.appArgs());

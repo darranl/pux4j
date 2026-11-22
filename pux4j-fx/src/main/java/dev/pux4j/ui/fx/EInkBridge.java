@@ -9,6 +9,7 @@ import dev.pux4j.ui.core.OrientationMapping;
 import dev.pux4j.ui.core.PixelFormat;
 import dev.pux4j.ui.core.FirstFrameMarkers;
 import dev.pux4j.ui.core.Pux4jContext;
+import dev.pux4j.ui.core.ScreenshotCapture;
 import dev.pux4j.ui.core.TouchCalibration;
 import dev.pux4j.ui.core.TouchCoordinateMapper;
 import dev.pux4j.ui.core.TouchDriver;
@@ -478,7 +479,7 @@ public final class EInkBridge {
         Pux4jContext context = Pux4jContext.managed();
         EInkDisplayDriver display = null;
         try {
-            display = FirstFrameMarkers.wrap(displayFactory.create(context, config));
+            display = ScreenshotCapture.wrap(FirstFrameMarkers.wrap(displayFactory.create(context, config)));
             display.initialize();
 
             OrientationMapping orientationMapping =
@@ -732,8 +733,10 @@ public final class EInkBridge {
                     : defaultRenderOptions(display.getCapabilities());
             RenderSession session = RenderSession.create(display.getCapabilities(), orientationMapping, options);
 
+            // Capture is off unless -Dpux4j.screenshots is set, so this returns display unchanged then.
             return new EInkBridge(
-                    null, display, touchDriver, touchMapper, orientationMapping, session, captureIntervalMs);
+                    null, ScreenshotCapture.wrap(FirstFrameMarkers.wrap(display)), touchDriver, touchMapper, orientationMapping, session,
+                    captureIntervalMs);
         }
 
         private static RenderOptions defaultRenderOptions(DisplayCapabilities caps) {
