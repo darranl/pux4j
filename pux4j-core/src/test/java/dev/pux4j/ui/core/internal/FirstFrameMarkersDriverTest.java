@@ -124,6 +124,17 @@ class FirstFrameMarkersDriverTest {
     }
 
     @Test
+    void theCallerGetsTheDriversOwnFutureAndCancellingItCannotHideTheMarker() {
+        Stub stub = new Stub();
+        stub.next = new CompletableFuture<>();
+        EInkDisplayDriver d = FirstFrameMarkers.wrap(stub);
+        var returned = d.writeFrame(frame());
+        org.junit.jupiter.api.Assertions.assertSame(stub.next, returned);
+        returned.cancel(false);   // the caller gives up on the write
+        assertTrue(messages().stream().anyMatch(s -> s.startsWith("first-frame write failed")));
+    }
+
+    @Test
     void failedFirstWriteIsWarnedNotMarkedWritten() {
         Stub stub = new Stub();
         stub.next = CompletableFuture.failedFuture(new IllegalStateException("boom"));

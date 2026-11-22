@@ -74,7 +74,9 @@ public final class FirstFrameMarkersDriver implements DisplayDriverDecorator, Au
             first.set(true);
             throw e;
         }
-        return result.whenComplete((v, error) -> {
+        // The logging is a side branch of the driver's own future, which is what the caller gets back:
+        // cancelling the returned future cannot cancel the logging stage and suppress the marker.
+        result.whenComplete((v, error) -> {
             if (error == null) {
                 log.info("first-frame-written epochMs={} writeMs={}", System.currentTimeMillis(),
                     (System.nanoTime() - handedNs) / 1_000_000);
@@ -83,6 +85,7 @@ public final class FirstFrameMarkersDriver implements DisplayDriverDecorator, Au
                 first.set(true);   // the next write counts as the first frame
             }
         });
+        return result;
     }
 
     @Override
