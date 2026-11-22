@@ -7,6 +7,7 @@ import dev.pux4j.ui.core.DriverConfig;
 import dev.pux4j.ui.core.EInkDisplayDriver;
 import dev.pux4j.ui.core.OrientationMapping;
 import dev.pux4j.ui.core.PixelFormat;
+import dev.pux4j.ui.core.FirstFrameMarkers;
 import dev.pux4j.ui.core.Pux4jContext;
 import dev.pux4j.ui.core.TouchCalibration;
 import dev.pux4j.ui.core.TouchCoordinateMapper;
@@ -477,7 +478,7 @@ public final class EInkBridge {
         Pux4jContext context = Pux4jContext.managed();
         EInkDisplayDriver display = null;
         try {
-            display = displayFactory.create(context, config);
+            display = FirstFrameMarkers.wrap(displayFactory.create(context, config));
             display.initialize();
 
             OrientationMapping orientationMapping =

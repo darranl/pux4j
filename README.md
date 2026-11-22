@@ -355,6 +355,11 @@ java.lang.UnsupportedOperationException: Unable to open DISPLAY
   tracing: the rule files are in the bundle's `byteman/` directory, the ByteMan agent jar is not
   shipped. `pux4j --help` shows an example.
 - Pull a log back to the build machine with `scp <host>:applications/pux4j/logs/demo.log .`.
+- Every app logs two INFO lines for the first frame it sends to the display:
+  `first-frame-handed epochMs=<ms>` (the write reached the driver) and
+  `first-frame-written epochMs=<ms> writeMs=<ms>` (it completed; on a real panel that is after the
+  refresh). `epochMs` is the wall-clock time in milliseconds, so a script can take `date +%s%3N` before
+  launching and subtract it, which separates start-up time from the panel refresh time.
 
 ---
 
