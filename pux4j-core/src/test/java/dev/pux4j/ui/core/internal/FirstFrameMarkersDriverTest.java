@@ -41,7 +41,7 @@ class FirstFrameMarkersDriverTest {
         logger.detachAppender(appender);
     }
 
-    private static final class Stub implements EInkDisplayDriver {
+    private static class Stub implements EInkDisplayDriver {
         final List<String> calls = new ArrayList<>();
         CompletableFuture<Void> next = CompletableFuture.completedFuture(null);
         public int getWidth() { return 8; }
@@ -100,6 +100,27 @@ class FirstFrameMarkersDriverTest {
         f.get();
         assertEquals(2, messages().size());
         assertTrue(messages().get(1).startsWith("first-frame-written"));
+    }
+
+    @Test
+    void synchronouslyRejectedFirstWriteIsWarnedAndTheNextWriteIsMarked() throws Exception {
+        Stub stub = new Stub() {
+            boolean rejected;
+            @Override public CompletableFuture<Void> writeRegion(int x, int y, int w, int h, FrameData f) {
+                if (!rejected) {
+                    rejected = true;
+                    throw new IllegalArgumentException("misaligned");
+                }
+                return super.writeRegion(x, y, w, h, f);
+            }
+        };
+        EInkDisplayDriver d = FirstFrameMarkers.wrap(stub);
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+            () -> d.writeRegion(4, 0, 8, 8, frame()));
+        assertTrue(messages().stream().anyMatch(s -> s.startsWith("first-frame write rejected")));
+        assertTrue(messages().stream().noneMatch(s -> s.startsWith("first-frame-written")));
+        d.writeRegion(0, 0, 8, 8, frame()).get();   // the next write carries the markers
+        assertTrue(messages().stream().anyMatch(s -> s.startsWith("first-frame-written")));
     }
 
     @Test

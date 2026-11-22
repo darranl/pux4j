@@ -733,7 +733,8 @@ public final class EInkBridge {
                     : defaultRenderOptions(display.getCapabilities());
             RenderSession session = RenderSession.create(display.getCapabilities(), orientationMapping, options);
 
-            // Capture is off unless -Dpux4j.screenshots is set, so this returns display unchanged then.
+            // The display is always wrapped for the first-frame markers; capture is added only when
+            // -Dpux4j.screenshots is set.
             return new EInkBridge(
                     null, ScreenshotCapture.wrap(FirstFrameMarkers.wrap(display)), touchDriver, touchMapper, orientationMapping, session,
                     captureIntervalMs);

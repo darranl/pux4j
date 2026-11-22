@@ -368,7 +368,9 @@ java.lang.UnsupportedOperationException: Unable to open DISPLAY
   `first-frame-handed epochMs=<ms>` (the write reached the driver) and
   `first-frame-written epochMs=<ms> writeMs=<ms>` (it completed; on a real panel that is after the
   refresh). `epochMs` is the wall-clock time in milliseconds, so a script can take `date +%s%3N` before
-  launching and subtract it, which separates start-up time from the panel refresh time.
+  launching and subtract it, which separates start-up time from the panel refresh time. If the first write
+  is rejected or fails, the next write is treated as the first frame, so a run can show more than one
+  `first-frame-handed` line; use the first of them and the first `first-frame-written`.
   This also applies to a bridge built with `EInkBridge.builder()`.
 
 ---

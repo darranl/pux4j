@@ -64,12 +64,23 @@ public final class FirstFrameMarkersDriver implements DisplayDriverDecorator, Au
                                          FrameData frame) {
         long handedNs = System.nanoTime();
         log.info("first-frame-handed epochMs={}", System.currentTimeMillis());
-        return write.apply(frame).whenComplete((v, error) -> {
+        CompletableFuture<Void> result;
+        try {
+            result = write.apply(frame);
+        } catch (RuntimeException e) {
+            // The driver rejected the write before returning a future (for example a region that fails
+            // its alignment check). Nothing was shown, so the next write counts as the first frame.
+            log.warn("first-frame write rejected: {}", e.toString());
+            first.set(true);
+            throw e;
+        }
+        return result.whenComplete((v, error) -> {
             if (error == null) {
                 log.info("first-frame-written epochMs={} writeMs={}", System.currentTimeMillis(),
                     (System.nanoTime() - handedNs) / 1_000_000);
             } else {
                 log.warn("first-frame write failed: {}", error.toString());
+                first.set(true);   // the next write counts as the first frame
             }
         });
     }
