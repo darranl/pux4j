@@ -23,6 +23,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class CapturingDisplayDriverTest {
 
@@ -120,5 +121,42 @@ class CapturingDisplayDriverTest {
         } finally {
             System.clearProperty(ScreenshotCapture.DIR_PROPERTY);
         }
+    }
+
+    @Test
+    void rejectedRegionDoesNotContaminateLaterScreenshots(@TempDir Path tmp) throws Exception {
+        Recorder rec = new Recorder(tmp.resolve("oracle"));
+        try (var cap = new CapturingDisplayDriver(rec, tmp.resolve("shots"), "s")) {
+            cap.writeFrame(frame(0xFF, W, H)).get();
+            // Extends below the framebuffer: the real driver rejects it.
+            assertThrows(IllegalArgumentException.class,
+                () -> cap.writeRegion(8, 20, 8, 8, frame(0x00, 8, 8)));
+            cap.writeRegion(0, 0, 8, 8, frame(0x00, 8, 8)).get();
+        }
+        ((AutoCloseable) rec.png).close();
+        List<Path> got = pngs(tmp.resolve("shots")), expected = pngs(tmp.resolve("oracle"));
+        assertEquals(2, got.size());
+        assertEquals(2, expected.size());
+        for (int i = 0; i < 2; i++) {
+            assertArrayEquals(Files.readAllBytes(expected.get(i)), Files.readAllBytes(got.get(i)));
+        }
+    }
+
+    @Test
+    void resetKeepsTheCapturedPixels(@TempDir Path tmp) throws Exception {
+        Recorder rec = new Recorder(tmp.resolve("oracle"));
+        try (var cap = new CapturingDisplayDriver(rec, tmp.resolve("shots"), "s")) {
+            cap.writeFrame(frame(0x00, W, H)).get();           // all black
+            cap.reset();                                        // real drivers keep showing it
+            cap.writeRegion(0, 0, 8, 8, frame(0xFF, 8, 8)).get(); // white square on the black frame
+        }
+        ((AutoCloseable) rec.png).close();
+        List<Path> got = pngs(tmp.resolve("shots"));
+        assertEquals(2, got.size());
+        // The white square must sit on the black frame, so the two screenshots differ and the
+        // second is not just a white screen.
+        byte[] second = Files.readAllBytes(got.get(1));
+        byte[] first = Files.readAllBytes(got.get(0));
+        org.junit.jupiter.api.Assertions.assertFalse(java.util.Arrays.equals(first, second));
     }
 }

@@ -18,9 +18,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -42,8 +43,35 @@ public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoClos
     private final int height;
     private final OrientationMapping mapping;
     private final int[] buffer;
-    private final ExecutorService worker = Executors.newSingleThreadExecutor(
-        Thread.ofVirtual().name("screenshot-writer-", 0).factory());
+    /** System property: how many captured frames may wait for the writer (default 16). */
+    public static final String QUEUE_PROPERTY = "pux4j.screenshots.queue";
+    private static final int DEFAULT_PENDING = 16;
+
+    // At most this many snapshots wait for the writer (about 150 KiB each on the 2.9" panel). When the
+    // output is slower than the display, further captures are dropped and logged, never blocking or
+    // failing the display; a gap in the file numbers shows where.
+    private final ExecutorService worker = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
+        new ArrayBlockingQueue<>(pendingLimit()),
+        Thread.ofVirtual().name("screenshot-writer-", 0).factory(),
+        (task, executor) -> log.warn("Screenshot writer is behind; dropped a capture"
+            + " (raise -D" + QUEUE_PROPERTY + " to queue more)"));
+
+    private static int pendingLimit() {
+        String value = System.getProperty(QUEUE_PROPERTY);
+        if (value == null) {
+            return DEFAULT_PENDING;
+        }
+        try {
+            int n = Integer.parseInt(value.trim());
+            if (n >= 1) {
+                return n;
+            }
+        } catch (NumberFormatException e) {
+            // fall through to the warning
+        }
+        log.warn("Ignoring {}={}: expected a positive integer; using {}", QUEUE_PROPERTY, value, DEFAULT_PENDING);
+        return DEFAULT_PENDING;
+    }
     private int[] lastWritten;
     private int count;
 
@@ -64,10 +92,10 @@ public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoClos
     @Override public Orientation getOrientation() { return delegate.getOrientation(); }
     @Override public DisplayCapabilities getCapabilities() { return delegate.getCapabilities(); }
     @Override public void initialize() { delegate.initialize(); }
-    @Override public void reset() {
-        delegate.reset();
-        synchronized (this) { Arrays.fill(buffer, 0xFFFFFFFF); }
-    }
+    // reset() deliberately leaves the captured pixels alone: the emulator and the HAT drivers keep
+    // showing (and retaining) the last frame across a reset, so the next region write is composited
+    // onto that frame, not onto white.
+    @Override public void reset() { delegate.reset(); }
     @Override public void sleep() { delegate.sleep(); }
     @Override public void wake() { delegate.wake(); }
     @Override public RefreshStats getRefreshStats() { return delegate.getRefreshStats(); }
@@ -84,7 +112,10 @@ public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoClos
 
     @Override
     public CompletableFuture<Void> writeRegion(int x, int y, int w, int h, FrameData frame) {
-        if (!(frame instanceof FourGrayFrame)) {
+        // An invalid rectangle is rejected by the real driver; capture nothing for it, so a rejected
+        // write cannot leave pixels in the buffer that later screenshots would show.
+        boolean valid = x >= 0 && y >= 0 && w > 0 && h > 0 && x + w <= width && y + h <= height;
+        if (valid && !(frame instanceof FourGrayFrame)) {
             capture(() -> {
                 int[] region = FrameRenderSupport.decodeMonochrome(((MonochromeFrame) frame).data(), w, h);
                 for (int row = 0; row < h; row++) {

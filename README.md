@@ -359,7 +359,9 @@ java.lang.UnsupportedOperationException: Unable to open DISPLAY
   orientation, as `<app>-NNNN.png` (for example `PUX4J_JAVA_OPTS="-Dpux4j.screenshots=$HOME/shots" pux4j demo`).
   It works with the emulator and the HAT drivers, and in native images where the option can be passed
   at run time. It records what the driver was asked to show, not what the panel does with it. It adds
-  some load, so leave it off when timing a start-up.
+  some load, so leave it off when timing a start-up. At most 16 captured frames wait for the writer
+  (`-Dpux4j.screenshots.queue=<n>` changes that); beyond that a capture is dropped with a warning and
+  the file numbers show a gap.
 
 ---
 
