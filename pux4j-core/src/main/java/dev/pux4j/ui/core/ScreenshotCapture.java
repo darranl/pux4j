@@ -37,6 +37,9 @@ public final class ScreenshotCapture {
         if (dir == null || dir.isBlank()) {
             return driver;
         }
+        if (driver instanceof CapturingDisplayDriver) {
+            return driver;   // already capturing: a second decorator would overwrite its files
+        }
         try {
             return new CapturingDisplayDriver(driver, Path.of(dir), System.getProperty(PREFIX_PROPERTY, "screen"));
         } catch (RuntimeException e) {

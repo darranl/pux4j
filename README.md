@@ -362,6 +362,8 @@ java.lang.UnsupportedOperationException: Unable to open DISPLAY
   some load, so leave it off when timing a start-up. At most 16 captured frames wait for the writer
   (`-Dpux4j.screenshots.queue=<n>` changes that); beyond that a capture is dropped with a warning and
   the file numbers show a gap.
+  Captures from several bridges in one run share one numbering, so nothing is overwritten; a second run
+  into the same directory does overwrite, so use a fresh directory for each run.
 
 ---
 

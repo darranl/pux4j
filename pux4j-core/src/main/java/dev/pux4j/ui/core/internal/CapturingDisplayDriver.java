@@ -20,9 +20,12 @@ import java.util.Arrays;
 import java.util.Locale;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Decorator that forwards to a real driver and writes each distinct displayed frame as a PNG.
@@ -73,17 +76,29 @@ public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoClos
         return DEFAULT_PENDING;
     }
     private int[] lastWritten;
-    private int count;
+
+    // File numbers are shared by every capture in this JVM that writes to the same directory and
+    // prefix, so several bridges in one run (for example one per panel size) never overwrite each
+    // other. Separate runs into one directory still do: use a fresh directory per run.
+    private static final ConcurrentMap<String, AtomicInteger> COUNTERS = new ConcurrentHashMap<>();
+    private final AtomicInteger counter;
+
+    // System.exit (for example closing the emulator window) skips close(), so a shutdown hook drains
+    // the queue; close() removes it.
+    private final Thread shutdownHook = new Thread(() -> drain(5), "screenshot-writer-drain");
 
     public CapturingDisplayDriver(EInkDisplayDriver delegate, Path outputDir, String prefix) {
         this.delegate = delegate;
         this.outputDir = outputDir;
         this.prefix = prefix;
+        this.counter = COUNTERS.computeIfAbsent(
+            outputDir.toAbsolutePath().normalize() + "|" + prefix, k -> new AtomicInteger());
         this.width = delegate.getWidth();
         this.height = delegate.getHeight();
         this.mapping = OrientationMapping.of(width, height, delegate.getOrientation());
         this.buffer = new int[width * height];
         Arrays.fill(buffer, 0xFFFFFFFF);
+        Runtime.getRuntime().addShutdownHook(shutdownHook);
         log.info("Capturing screenshots to {} as {}-NNNN.png", outputDir, prefix);
     }
 
@@ -143,7 +158,7 @@ public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoClos
             }
             int[] snapshot = buffer.clone();
             lastWritten = snapshot;
-            int sequence = ++count;
+            int sequence = counter.incrementAndGet();
             worker.execute(() -> write(snapshot, sequence));
         } catch (RuntimeException e) {
             log.warn("Screenshot capture failed; the display is unaffected", e);
@@ -165,15 +180,26 @@ public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoClos
         }
     }
 
-    /** Lets queued screenshots finish writing (up to 10 s). */
-    @Override
-    public void close() {
+    private void drain(int seconds) {
         worker.shutdown();
         try {
-            worker.awaitTermination(10, TimeUnit.SECONDS);
+            if (!worker.awaitTermination(seconds, TimeUnit.SECONDS)) {
+                log.warn("Screenshot writer did not finish within {} s; some captures may be lost", seconds);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+    }
+
+    /** Lets queued screenshots finish writing (up to 10 s), then closes the wrapped driver. */
+    @Override
+    public void close() {
+        try {
+            Runtime.getRuntime().removeShutdownHook(shutdownHook);
+        } catch (IllegalStateException e) {
+            // the JVM is already shutting down; the hook is running or about to
+        }
+        drain(10);
         if (delegate instanceof AutoCloseable closeable) {
             try {
                 closeable.close();

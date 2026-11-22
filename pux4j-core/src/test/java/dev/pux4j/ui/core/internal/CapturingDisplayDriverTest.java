@@ -211,4 +211,36 @@ class CapturingDisplayDriverTest {
             System.clearProperty(ScreenshotCapture.DIR_PROPERTY);
         }
     }
+
+    @Test
+    void wrappingAnAlreadyCapturingDriverReturnsItUnchanged(@TempDir Path tmp) throws Exception {
+        System.setProperty(ScreenshotCapture.DIR_PROPERTY, tmp.resolve("s").toString());
+        try {
+            EInkDisplayDriver once = ScreenshotCapture.wrap(new Recorder(tmp.resolve("o")));
+            assertSame(once, ScreenshotCapture.wrap(once));
+            ((AutoCloseable) once).close();
+        } finally {
+            System.clearProperty(ScreenshotCapture.DIR_PROPERTY);
+        }
+    }
+
+    @Test
+    void captureOfSeveralDriversInOneDirectoryNeverOverwrites(@TempDir Path tmp) throws Exception {
+        Path shots = tmp.resolve("shots");
+        try (var a = new CapturingDisplayDriver(new Recorder(tmp.resolve("oa")), shots, "same");
+             var b = new CapturingDisplayDriver(new Recorder(tmp.resolve("ob")), shots, "same")) {
+            a.writeFrame(frame(0xFF, W, H)).get();
+            b.writeFrame(frame(0x00, W, H)).get();
+            a.writeFrame(frame(0x00, W, H)).get();
+        }
+        assertEquals(List.of("same-0001.png", "same-0002.png", "same-0003.png"),
+            pngs(shots).stream().map(p -> p.getFileName().toString()).toList());
+    }
+
+    @Test
+    void closeRemovesTheShutdownHookAndIsRepeatable(@TempDir Path tmp) throws Exception {
+        var cap = new CapturingDisplayDriver(new Recorder(tmp.resolve("o")), tmp.resolve("shots"), "h");
+        cap.close();
+        cap.close();   // a second close must not throw
+    }
 }
