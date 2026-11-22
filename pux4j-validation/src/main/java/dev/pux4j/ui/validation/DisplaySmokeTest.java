@@ -62,7 +62,8 @@ public final class DisplaySmokeTest {
             .property("orientation", orientation.name())
                 .build();
         try (Pux4jContext ctx = Pux4jContext.managed()) {
-            EInkDisplayDriver driver = dev.pux4j.ui.core.ScreenshotCapture.wrap(factory.create(ctx, config));
+            EInkDisplayDriver driver = dev.pux4j.ui.core.ScreenshotCapture.wrap(
+                dev.pux4j.ui.core.FirstFrameMarkers.wrap(factory.create(ctx, config)));
             try {
                 banner("INIT");
                 long initStart = System.nanoTime();

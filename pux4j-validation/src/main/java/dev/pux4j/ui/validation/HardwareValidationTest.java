@@ -86,7 +86,8 @@ public final class HardwareValidationTest {
 
             DriverConfig config = createDriverConfig(options, orientation);
 
-            display = dev.pux4j.ui.core.ScreenshotCapture.wrap(displayFactory.create(ctx, config));
+            display = dev.pux4j.ui.core.ScreenshotCapture.wrap(
+                dev.pux4j.ui.core.FirstFrameMarkers.wrap(displayFactory.create(ctx, config)));
             touch = touchFactory.create(ctx, config);
 
             display.initialize();
