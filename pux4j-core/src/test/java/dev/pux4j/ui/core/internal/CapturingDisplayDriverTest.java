@@ -30,7 +30,7 @@ class CapturingDisplayDriverTest {
     private static final int W = 16, H = 24;
 
     /** Records calls; stands in for a real driver. */
-    private static final class Recorder implements EInkDisplayDriver {
+    private static class Recorder implements EInkDisplayDriver {
         final List<String> calls = new ArrayList<>();
         final EInkDisplayDriver png;
         Recorder(Path pngDir) {
@@ -158,5 +158,57 @@ class CapturingDisplayDriverTest {
         byte[] second = Files.readAllBytes(got.get(1));
         byte[] first = Files.readAllBytes(got.get(0));
         org.junit.jupiter.api.Assertions.assertFalse(java.util.Arrays.equals(first, second));
+    }
+
+    /** A stand-in that rejects everything, as a HAT driver rejects a misaligned region. */
+    private static final class Rejecting extends Recorder {
+        Rejecting(Path dir) { super(dir); }
+        @Override public CompletableFuture<Void> writeRegion(int x, int y, int w, int h, FrameData f) {
+            throw new IllegalArgumentException("rejected");
+        }
+    }
+
+    @Test
+    void synchronouslyRejectedWriteIsNotCaptured(@TempDir Path tmp) throws Exception {
+        Rejecting rec = new Rejecting(tmp.resolve("oracle"));
+        try (var cap = new CapturingDisplayDriver(rec, tmp.resolve("shots"), "s")) {
+            cap.writeFrame(frame(0xFF, W, H)).get();
+            assertThrows(IllegalArgumentException.class,
+                () -> cap.writeRegion(4, 0, 8, 8, frame(0x00, 8, 8)));   // in bounds, driver rejects
+            cap.writeFrame(frame(0xFF, W, H)).get();                      // identical to the first
+        }
+        // Only the first frame: the rejected region left nothing behind, so the third write is a duplicate.
+        assertEquals(1, pngs(tmp.resolve("shots")).size());
+    }
+
+    @Test
+    void resetClearsTheCaptureOnlyForThePngDriver(@TempDir Path tmp) throws Exception {
+        // Directly wrapped PNG driver: its reset clears to white, so the capture must too.
+        Path oracle = tmp.resolve("oracle");
+        EInkDisplayDriver png = DisplayDriverFactory.select("png").create(null, DriverConfig.builder()
+            .property("width", W).property("height", H)
+            .property("orientation", "LANDSCAPE").property("outputDir", oracle.toString()).build());
+        try (var cap = new CapturingDisplayDriver(png, tmp.resolve("shots"), "s")) {
+            cap.writeFrame(frame(0x00, W, H)).get();                       // black
+            cap.reset();                                                    // PNG driver: white
+            cap.writeRegion(0, 0, 8, 8, frame(0xFF, 8, 8)).get();          // white square
+        }
+        List<Path> got = pngs(tmp.resolve("shots")), expected = pngs(oracle);
+        assertEquals(2, got.size());
+        assertEquals(2, expected.size());
+        for (int i = 0; i < 2; i++) {
+            assertArrayEquals(Files.readAllBytes(expected.get(i)), Files.readAllBytes(got.get(i)));
+        }
+    }
+
+    @Test
+    void wrapFallsBackToTheOriginalDriverWhenSetupFails(@TempDir Path tmp) {
+        System.setProperty(ScreenshotCapture.DIR_PROPERTY, "bad\0dir");   // NUL: InvalidPathException
+        try {
+            EInkDisplayDriver d = new Recorder(tmp.resolve("o"));
+            assertSame(d, ScreenshotCapture.wrap(d));
+        } finally {
+            System.clearProperty(ScreenshotCapture.DIR_PROPERTY);
+        }
     }
 }

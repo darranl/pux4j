@@ -92,10 +92,15 @@ public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoClos
     @Override public Orientation getOrientation() { return delegate.getOrientation(); }
     @Override public DisplayCapabilities getCapabilities() { return delegate.getCapabilities(); }
     @Override public void initialize() { delegate.initialize(); }
-    // reset() deliberately leaves the captured pixels alone: the emulator and the HAT drivers keep
-    // showing (and retaining) the last frame across a reset, so the next region write is composited
-    // onto that frame, not onto white.
-    @Override public void reset() { delegate.reset(); }
+    // The emulator and the HAT drivers keep showing (and retaining) the last frame across a reset, so
+    // the captured pixels are kept and the next region write is composited onto that frame. The PNG
+    // driver is the exception: its reset clears its retained buffer to white, and so does this one.
+    @Override public void reset() {
+        delegate.reset();
+        if (delegate instanceof PngEInkDisplay) {
+            synchronized (this) { Arrays.fill(buffer, 0xFFFFFFFF); }
+        }
+    }
     @Override public void sleep() { delegate.sleep(); }
     @Override public void wake() { delegate.wake(); }
     @Override public RefreshStats getRefreshStats() { return delegate.getRefreshStats(); }
@@ -103,17 +108,21 @@ public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoClos
 
     @Override
     public CompletableFuture<Void> writeFrame(FrameData frame) {
+        // The delegate goes first: if it rejects the write synchronously, nothing is captured.
+        // A write that fails later, asynchronously, is still captured.
+        CompletableFuture<Void> result = delegate.writeFrame(frame);
         capture(() -> {
             int[] decoded = FrameRenderSupport.decode(frame, width, height);
             System.arraycopy(decoded, 0, buffer, 0, buffer.length);
         });
-        return delegate.writeFrame(frame);
+        return result;
     }
 
     @Override
     public CompletableFuture<Void> writeRegion(int x, int y, int w, int h, FrameData frame) {
-        // An invalid rectangle is rejected by the real driver; capture nothing for it, so a rejected
-        // write cannot leave pixels in the buffer that later screenshots would show.
+        // The delegate goes first (see writeFrame). The bounds check is a second guard, so a rectangle
+        // a driver does not validate can never write outside the buffer.
+        CompletableFuture<Void> result = delegate.writeRegion(x, y, w, h, frame);
         boolean valid = x >= 0 && y >= 0 && w > 0 && h > 0 && x + w <= width && y + h <= height;
         if (valid && !(frame instanceof FourGrayFrame)) {
             capture(() -> {
@@ -123,7 +132,7 @@ public final class CapturingDisplayDriver implements EInkDisplayDriver, AutoClos
                 }
             });
         }
-        return delegate.writeRegion(x, y, w, h, frame);
+        return result;
     }
 
     private synchronized void capture(Runnable composite) {

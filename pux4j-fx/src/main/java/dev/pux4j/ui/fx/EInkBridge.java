@@ -732,8 +732,10 @@ public final class EInkBridge {
                     : defaultRenderOptions(display.getCapabilities());
             RenderSession session = RenderSession.create(display.getCapabilities(), orientationMapping, options);
 
+            // Capture is off unless -Dpux4j.screenshots is set, so this returns display unchanged then.
             return new EInkBridge(
-                    null, display, touchDriver, touchMapper, orientationMapping, session, captureIntervalMs);
+                    null, ScreenshotCapture.wrap(display), touchDriver, touchMapper, orientationMapping, session,
+                    captureIntervalMs);
         }
 
         private static RenderOptions defaultRenderOptions(DisplayCapabilities caps) {

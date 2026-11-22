@@ -3,6 +3,8 @@ package dev.pux4j.ui.core;
 
 import dev.pux4j.ui.core.internal.CapturingDisplayDriver;
 
+import org.slf4j.LoggerFactory;
+
 import java.nio.file.Path;
 
 /**
@@ -14,7 +16,7 @@ import java.nio.file.Path;
  * {@code <prefix>-NNNN.png}. The prefix is the value of {@value #PREFIX_PROPERTY}
  * (default {@code screen}); the launcher sets it to the app name when it is not set.
  * A frame identical to the previous one is not written again. Without the property the driver
- * is returned unchanged.
+ * is returned unchanged, as it is if capture cannot be set up (a warning is logged).
  *
  * <p>The capture shows what the driver was asked to display. It does not show what a physical
  * panel does with it (ghosting, waveform or wiring faults). Capture failures are logged and
@@ -35,6 +37,13 @@ public final class ScreenshotCapture {
         if (dir == null || dir.isBlank()) {
             return driver;
         }
-        return new CapturingDisplayDriver(driver, Path.of(dir), System.getProperty(PREFIX_PROPERTY, "screen"));
+        try {
+            return new CapturingDisplayDriver(driver, Path.of(dir), System.getProperty(PREFIX_PROPERTY, "screen"));
+        } catch (RuntimeException e) {
+            // A bad directory or any setup failure must not stop the app: carry on without capture.
+            LoggerFactory.getLogger(ScreenshotCapture.class)
+                .warn("Screenshot capture is off: could not set it up for {}={}", DIR_PROPERTY, dir, e);
+            return driver;
+        }
     }
 }
