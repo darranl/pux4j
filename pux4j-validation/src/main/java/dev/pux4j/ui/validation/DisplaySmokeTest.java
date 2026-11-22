@@ -62,7 +62,7 @@ public final class DisplaySmokeTest {
             .property("orientation", orientation.name())
                 .build();
         try (Pux4jContext ctx = Pux4jContext.managed()) {
-            EInkDisplayDriver driver = factory.create(ctx, config);
+            EInkDisplayDriver driver = dev.pux4j.ui.core.ScreenshotCapture.wrap(factory.create(ctx, config));
 
             banner("INIT");
             long initStart = System.nanoTime();
@@ -239,6 +239,9 @@ public final class DisplaySmokeTest {
 
             banner("SLEEP & SHUTDOWN");
             driver.sleep();
+            if (driver instanceof AutoCloseable closeable) {
+                closeable.close(); // lets queued screenshots finish writing
+            }
             log.info("DisplaySmokeTest: PASS — all 7 steps completed without exception");
         } catch (Exception e) {
             log.error("DisplaySmokeTest: FAILED with exception", e);

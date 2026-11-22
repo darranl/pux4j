@@ -86,7 +86,7 @@ public final class HardwareValidationTest {
 
             DriverConfig config = createDriverConfig(options, orientation);
 
-            display = displayFactory.create(ctx, config);
+            display = dev.pux4j.ui.core.ScreenshotCapture.wrap(displayFactory.create(ctx, config));
             touch = touchFactory.create(ctx, config);
 
             display.initialize();
@@ -213,6 +213,13 @@ public final class HardwareValidationTest {
                     display.sleep();
                 } catch (Exception e) {
                     log.warn("Display sleep failed", e);
+                }
+                if (display instanceof AutoCloseable closeable) {
+                    try {
+                        closeable.close(); // lets queued screenshots finish writing
+                    } catch (Exception e) {
+                        log.warn("Display close failed", e);
+                    }
                 }
             }
             ctx.close();
