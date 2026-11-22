@@ -2,7 +2,7 @@
 # Run a pux4j demo on the desktop emulator through EInkBridge (drivers are auto-selected).
 #
 # Usage:
-#   ./run-emulator.sh <app> [<app args> ...] [-D<pux4j property>=<value> ...]
+#   ./run-emulator.sh [--screenshots <dir>] <app> [<app args> ...] [-D<pux4j property>=<value> ...]
 #   ./run-emulator.sh --list
 #
 # Two kinds of app share one name space: JavaFX apps ("demo", the counter, and "dice-demo"; run
@@ -12,6 +12,9 @@
 # are JVM properties. Exit codes: 0 success, 1 failure, 2 usage error.
 # Emulated panel and window scale: -Dpux4j.emulator.display=ssd1675a|ssd1680 and
 # -Dpux4j.emulator.scale=<n> (see the README, "Emulating different hardware").
+#
+# Screenshots (any mode, not only the emulator): -Dpux4j.screenshots=<dir> writes each distinct frame shown
+# as <app>-NNNN.png in <dir>; or use --screenshots <dir> with this script.
 #
 # This script only runs; it never builds. Build first from the repository root: mvn install (or mvn package).
 # After editing sources, build again: the script runs whatever the last build left in target/.
@@ -40,11 +43,15 @@ MODULE_PATH=$(ls "$LIB_DIR"/*.jar | tr '\n' ':')
 
 JVM_ARGS=()   # -D options
 APP_ARGS=()   # app name, its arguments, --list (anything not -D*, passed through unchanged)
-for arg in "$@"; do
-  case "$arg" in
-    -D*) JVM_ARGS+=("$arg") ;;
-    *)   APP_ARGS+=("$arg") ;;
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --screenshots)
+      if [ $# -lt 2 ]; then echo "ERROR: --screenshots needs a directory" >&2; exit 2; fi
+      JVM_ARGS+=("-Dpux4j.screenshots=$2"); shift ;;
+    -D*) JVM_ARGS+=("$1") ;;
+    *)   APP_ARGS+=("$1") ;;
   esac
+  shift
 done
 
 exec java \

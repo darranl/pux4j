@@ -62,184 +62,194 @@ public final class DisplaySmokeTest {
             .property("orientation", orientation.name())
                 .build();
         try (Pux4jContext ctx = Pux4jContext.managed()) {
-            EInkDisplayDriver driver = factory.create(ctx, config);
+            EInkDisplayDriver driver = dev.pux4j.ui.core.ScreenshotCapture.wrap(factory.create(ctx, config));
+            try {
+                banner("INIT");
+                long initStart = System.nanoTime();
+                driver.initialize();
+                log.info("initialize complete in {} ms", elapsedMs(initStart));
 
-            banner("INIT");
-            long initStart = System.nanoTime();
-            driver.initialize();
-            log.info("initialize complete in {} ms", elapsedMs(initStart));
+                // Query display dimensions and compute layout constants
+                WIDTH = driver.getWidth();
+                HEIGHT = driver.getHeight();
+                ROW_BYTES = (WIDTH + 7) / 8;  // Ceiling division: ceil(WIDTH / 8)
+                FRAME_BYTES = ROW_BYTES * HEIGHT;
+                CENTER_ROW = HEIGHT / 2;
+                CENTER_BYTE = (WIDTH / 2) / 8;  // Center pixel position converted to byte index
+            
+                // Scale block sizes proportionally to display height
+                // Outer block should be visually prominent, inner creates border effect
+                BLOCK_HALF_ROWS = (int)(HEIGHT * 0.16);  // 16% of height on each side = 32% total
+                BLOCK_HALF_BYTES = (int)(ROW_BYTES * 0.19); // ~19% of width on each side
+            
+                // Inner block: inset by 1 byte (8 pixels) on each side to create visible border
+                INNER_HALF_ROWS = BLOCK_HALF_ROWS - (BLOCK_HALF_ROWS / 4);  // ~75% of outer block height
+                INNER_HALF_BYTES = Math.max(1, BLOCK_HALF_BYTES - 1);  // 1 byte inset from outer block
+            
+                log.info("display dimensions = {}x{} native ({} bytes per frame)", WIDTH, HEIGHT, FRAME_BYTES);
+                log.info("landscape view: {}px wide x {}px tall", HEIGHT, WIDTH);
+                log.info("block dimensions: {}x{} px, inner: {}x{} px",
+                    BLOCK_HALF_ROWS * 2, BLOCK_HALF_BYTES * 8,
+                    INNER_HALF_ROWS * 2, INNER_HALF_BYTES * 8);
 
-            // Query display dimensions and compute layout constants
-            WIDTH = driver.getWidth();
-            HEIGHT = driver.getHeight();
-            ROW_BYTES = (WIDTH + 7) / 8;  // Ceiling division: ceil(WIDTH / 8)
-            FRAME_BYTES = ROW_BYTES * HEIGHT;
-            CENTER_ROW = HEIGHT / 2;
-            CENTER_BYTE = (WIDTH / 2) / 8;  // Center pixel position converted to byte index
-            
-            // Scale block sizes proportionally to display height
-            // Outer block should be visually prominent, inner creates border effect
-            BLOCK_HALF_ROWS = (int)(HEIGHT * 0.16);  // 16% of height on each side = 32% total
-            BLOCK_HALF_BYTES = (int)(ROW_BYTES * 0.19); // ~19% of width on each side
-            
-            // Inner block: inset by 1 byte (8 pixels) on each side to create visible border
-            INNER_HALF_ROWS = BLOCK_HALF_ROWS - (BLOCK_HALF_ROWS / 4);  // ~75% of outer block height
-            INNER_HALF_BYTES = Math.max(1, BLOCK_HALF_BYTES - 1);  // 1 byte inset from outer block
-            
-            log.info("display dimensions = {}x{} native ({} bytes per frame)", WIDTH, HEIGHT, FRAME_BYTES);
-            log.info("landscape view: {}px wide x {}px tall", HEIGHT, WIDTH);
-            log.info("block dimensions: {}x{} px, inner: {}x{} px",
-                BLOCK_HALF_ROWS * 2, BLOCK_HALF_BYTES * 8,
-                INNER_HALF_ROWS * 2, INNER_HALF_BYTES * 8);
+                // ── Step 0: FULL refresh — up-arrow orientation marker ────────────
+                // Drawn before anything else: none of steps 1-7's patterns (bars, stripes,
+                // checker) make it obvious at a glance which physical edge is "up" in logical
+                // space. A solid arrow pointing toward logical (x=0..logicalWidth, y=0) answers
+                // that immediately. Built with Canvas/OrientationMapping (pux4j-core) rather than
+                // by hand at the byte level like the rest of this class, since an arrow shape
+                // needs real drawing primitives (fillPolygon) that aren't worth reimplementing
+                // here — see notes/project-plan.md Phase 6.0.
+                banner("Step 0: FULL refresh — up-arrow orientation marker");
+                log.info("OBSERVE (landscape): solid black arrow pointing toward the top of the panel");
+                OrientationMapping orientationMapping = OrientationMapping.of(WIDTH, HEIGHT, orientation);
+                doFull(driver, upArrowMarker(orientationMapping), "up-arrow orientation marker");
+                sleepWithProgress(4_000, "observe step 0");
 
-            // ── Step 0: FULL refresh — up-arrow orientation marker ────────────
-            // Drawn before anything else: none of steps 1-7's patterns (bars, stripes,
-            // checker) make it obvious at a glance which physical edge is "up" in logical
-            // space. A solid arrow pointing toward logical (x=0..logicalWidth, y=0) answers
-            // that immediately. Built with Canvas/OrientationMapping (pux4j-core) rather than
-            // by hand at the byte level like the rest of this class, since an arrow shape
-            // needs real drawing primitives (fillPolygon) that aren't worth reimplementing
-            // here — see notes/project-plan.md Phase 6.0.
-            banner("Step 0: FULL refresh — up-arrow orientation marker");
-            log.info("OBSERVE (landscape): solid black arrow pointing toward the top of the panel");
-            OrientationMapping orientationMapping = OrientationMapping.of(WIDTH, HEIGHT, orientation);
-            doFull(driver, upArrowMarker(orientationMapping), "up-arrow orientation marker");
-            sleepWithProgress(4_000, "observe step 0");
+                // ── Step 1: FULL slow — three-bar marker ──────────────────────────
+                // Three evenly-spaced vertical bars in landscape: left edge, centre,
+                // right edge. Unmistakably intentional; confirms full-refresh polarity.
+                banner("Step 1: FULL refresh — three-bar marker");
+                log.info("OBSERVE (landscape): 3 black vertical bars — left edge, centre, right edge; white gaps");
+                doFull(driver, threeBarMarker(), "three-bar marker");
+                sleepWithProgress(4_000, "observe step 1");
 
-            // ── Step 1: FULL slow — three-bar marker ──────────────────────────
-            // Three evenly-spaced vertical bars in landscape: left edge, centre,
-            // right edge. Unmistakably intentional; confirms full-refresh polarity.
-            banner("Step 1: FULL refresh — three-bar marker");
-            log.info("OBSERVE (landscape): 3 black vertical bars — left edge, centre, right edge; white gaps");
-            doFull(driver, threeBarMarker(), "three-bar marker");
-            sleepWithProgress(4_000, "observe step 1");
+                // ── Step 2: FAST — stripes ────────────────────────────────────────
+                // 8-pixel alternating black/white stripes cover the whole panel
+                // without a white flash. If a flash is visible, FAST LUT is broken.
+                banner("Step 2: FAST refresh — shape B (8px stripes)");
+                log.info("OBSERVE (landscape): alternating 8px black/white vertical bands, no white flash");
+                byte[] stripes = shapeB();
+                doFast(driver, stripes, "shape B — stripes");
+                sleepWithProgress(4_000, "observe step 2");
 
-            // ── Step 2: FAST — stripes ────────────────────────────────────────
-            // 8-pixel alternating black/white stripes cover the whole panel
-            // without a white flash. If a flash is visible, FAST LUT is broken.
-            banner("Step 2: FAST refresh — shape B (8px stripes)");
-            log.info("OBSERVE (landscape): alternating 8px black/white vertical bands, no white flash");
-            byte[] stripes = shapeB();
-            doFast(driver, stripes, "shape B — stripes");
-            sleepWithProgress(4_000, "observe step 2");
+                // ── Step 3: PARTIAL — solid centre block ──────────────────────────
+                // Paint a solid black rectangle in the centre of the stripe background.
+                // Partial waveform should update only the block area; stripes unchanged.
+                banner("Step 3: PARTIAL refresh — solid black centre block");
+                log.info("OBSERVE (landscape): solid black rectangle appears in centre; stripes unchanged around it");
+                byte[] overlayB1 = stripes.clone();
+            
+                // Log block dimensions and positions for verification
+                int blockStartRow = CENTER_ROW - BLOCK_HALF_ROWS;
+                int blockNumRows = BLOCK_HALF_ROWS * 2;
+                int blockStartByte = CENTER_BYTE - BLOCK_HALF_BYTES;
+                int blockNumBytes = BLOCK_HALF_BYTES * 2;
+                log.info("Step 3 block: rows [{}, {}), bytes [{}, {})",
+                    blockStartRow, blockStartRow + blockNumRows,
+                    blockStartByte, blockStartByte + blockNumBytes);
+            
+                solidBlock(overlayB1, blockStartRow, blockNumRows, blockStartByte, blockNumBytes);
+            
+                // Verify the block was filled correctly - check center row, center byte
+                int centerRowOffset = CENTER_ROW * ROW_BYTES + CENTER_BYTE;
+                byte centerValue = overlayB1[centerRowOffset];
+                log.info("Step 3 verification: center byte (row={}, byte={}, offset={}) = 0x{} (expect 0x00)",
+                    CENTER_ROW, CENTER_BYTE, centerRowOffset, String.format("%02X", centerValue & 0xFF));
+            
+                // Check a few bytes around center to see the pattern
+                StringBuilder hexDump = new StringBuilder();
+                for (int i = -2; i <= 2; i++) {
+                    int offset = centerRowOffset + i;
+                    if (offset >= 0 && offset < overlayB1.length) {
+                        hexDump.append(String.format("%02X ", overlayB1[offset] & 0xFF));
+                    }
+                }
+                log.info("Step 3 center bytes [{}-2..{}+2]: {}", CENTER_BYTE, CENTER_BYTE, hexDump);
+            
+                if (centerValue != (byte)0x00) {
+                    throw new IllegalStateException(
+                        "Frame generation error: center of block should be black (0x00), was: 0x"
+                        + String.format("%02X", centerValue & 0xFF));
+                }
+            
+                doPartial(driver, overlayB1, "centre block — solid black");
+                sleepWithProgress(4_000, "observe step 3");
 
-            // ── Step 3: PARTIAL — solid centre block ──────────────────────────
-            // Paint a solid black rectangle in the centre of the stripe background.
-            // Partial waveform should update only the block area; stripes unchanged.
-            banner("Step 3: PARTIAL refresh — solid black centre block");
-            log.info("OBSERVE (landscape): solid black rectangle appears in centre; stripes unchanged around it");
-            byte[] overlayB1 = stripes.clone();
+                // ── Step 4: PARTIAL — hollow the block (create a frame) ──────────
+                // Erase the interior of the block to white, leaving a black border.
+                // Tests a second consecutive partial update on the same region.
+                banner("Step 4: PARTIAL refresh — hollow centre block (black border, white interior)");
+                log.info("OBSERVE (landscape): centre block becomes a black-bordered rectangle with white interior");
+                byte[] overlayB2 = overlayB1.clone();
+                whiteBlock(overlayB2, CENTER_ROW - INNER_HALF_ROWS, INNER_HALF_ROWS * 2,
+                                      CENTER_BYTE - INNER_HALF_BYTES, INNER_HALF_BYTES * 2);
+                doPartial(driver, overlayB2, "centre block — hollow (frame)");
+                sleepWithProgress(4_000, "observe step 4");
+
+                // ── Step 5: FAST — checker ────────────────────────────────────────
+                // Switch to 8×8 checker without a white flash. Tests FAST after
+                // two consecutive PARTIAL refreshes.
+                banner("Step 5: FAST refresh — shape C (8×8 checker)");
+                log.info("OBSERVE (landscape): fine 8×8 checker pattern replaces stripes, no white flash");
+                byte[] checker = shapeC();
+                doFast(driver, checker, "shape C — checker");
+                sleepWithProgress(4_000, "observe step 5");
+
+                // ── Step 6: PARTIAL — solid white centre window ───────────────────
+                // Paint a solid white rectangle in the centre of the checker.
+                // The white "window" on the checker background is clearly visible.
+                banner("Step 6: PARTIAL refresh — white centre window on checker");
+                log.info("OBSERVE (landscape): solid white rectangle appears in centre; checker unchanged around it");
+                byte[] overlayC1 = checker.clone();
             
-            // Log block dimensions and positions for verification
-            int blockStartRow = CENTER_ROW - BLOCK_HALF_ROWS;
-            int blockNumRows = BLOCK_HALF_ROWS * 2;
-            int blockStartByte = CENTER_BYTE - BLOCK_HALF_BYTES;
-            int blockNumBytes = BLOCK_HALF_BYTES * 2;
-            log.info("Step 3 block: rows [{}, {}), bytes [{}, {})",
-                blockStartRow, blockStartRow + blockNumRows,
-                blockStartByte, blockStartByte + blockNumBytes);
+                int whiteBlockStartRow = CENTER_ROW - BLOCK_HALF_ROWS;
+                int whiteBlockNumRows = BLOCK_HALF_ROWS * 2;
+                int whiteBlockStartByte = CENTER_BYTE - BLOCK_HALF_BYTES;
+                int whiteBlockNumBytes = BLOCK_HALF_BYTES * 2;
+                log.info("Step 6 white block: rows [{}, {}), bytes [{}, {})",
+                    whiteBlockStartRow, whiteBlockStartRow + whiteBlockNumRows,
+                    whiteBlockStartByte, whiteBlockStartByte + whiteBlockNumBytes);
             
-            solidBlock(overlayB1, blockStartRow, blockNumRows, blockStartByte, blockNumBytes);
+                whiteBlock(overlayC1, whiteBlockStartRow, whiteBlockNumRows, 
+                           whiteBlockStartByte, whiteBlockNumBytes);
             
-            // Verify the block was filled correctly - check center row, center byte
-            int centerRowOffset = CENTER_ROW * ROW_BYTES + CENTER_BYTE;
-            byte centerValue = overlayB1[centerRowOffset];
-            log.info("Step 3 verification: center byte (row={}, byte={}, offset={}) = 0x{} (expect 0x00)",
-                CENTER_ROW, CENTER_BYTE, centerRowOffset, String.format("%02X", centerValue & 0xFF));
+                // Verify the white block was filled correctly
+                int whiteCenterOffset = CENTER_ROW * ROW_BYTES + CENTER_BYTE;
+                byte whiteCenterValue = overlayC1[whiteCenterOffset];
+                log.info("Step 6 verification: center byte (row={}, byte={}, offset={}) = 0x{} (expect 0xFF)",
+                    CENTER_ROW, CENTER_BYTE, whiteCenterOffset, String.format("%02X", whiteCenterValue & 0xFF));
+                if (whiteCenterValue != (byte)0xFF) {
+                    throw new IllegalStateException(
+                        "Frame generation error: center of white block should be white (0xFF), was: 0x"
+                        + String.format("%02X", whiteCenterValue & 0xFF));
+                }
             
-            // Check a few bytes around center to see the pattern
-            StringBuilder hexDump = new StringBuilder();
-            for (int i = -2; i <= 2; i++) {
-                int offset = centerRowOffset + i;
-                if (offset >= 0 && offset < overlayB1.length) {
-                    hexDump.append(String.format("%02X ", overlayB1[offset] & 0xFF));
+                doPartial(driver, overlayC1, "centre window — white on checker");
+                sleepWithProgress(4_000, "observe step 6");
+
+                // ── Step 7: PARTIAL — black icon inside white window ──────────────
+                // Draw a smaller solid black rectangle inside the white window.
+                // Demonstrates a second partial update composing on top of step 6.
+                banner("Step 7: PARTIAL refresh — black icon inside white window");
+                log.info("OBSERVE (landscape): small solid black rectangle appears inside the white window");
+                byte[] overlayC2 = overlayC1.clone();
+                solidBlock(overlayC2, CENTER_ROW - INNER_HALF_ROWS, INNER_HALF_ROWS * 2,
+                                      CENTER_BYTE - INNER_HALF_BYTES, INNER_HALF_BYTES * 2);
+                doPartial(driver, overlayC2, "icon — black inside white window");
+                sleepWithProgress(4_000, "observe step 7");
+
+                // ── Final: FULL clear — all white ────────────────────────────────
+                // WaveShare recommend not leaving pixels set when the display goes
+                // to sleep, as sustained pixel states can cause long-term burn-in.
+                banner("Final: FULL refresh — all white (screen clear before sleep)");
+                log.info("OBSERVE (landscape): panel flashes and clears to solid white");
+                doFull(driver, allWhite(), "all-white screen clear");
+                sleepWithProgress(2_000, "observe final clear");
+
+                banner("SLEEP & SHUTDOWN");
+                driver.sleep();
+                log.info("DisplaySmokeTest: PASS — all 7 steps completed without exception");
+            } finally {
+                // Always lets queued screenshots finish writing, even if a step or sleep() failed.
+                if (driver instanceof AutoCloseable closeable) {
+                    try {
+                        closeable.close();
+                    } catch (Exception e) {
+                        log.warn("Closing the display driver failed", e);
+                    }
                 }
             }
-            log.info("Step 3 center bytes [{}-2..{}+2]: {}", CENTER_BYTE, CENTER_BYTE, hexDump);
-            
-            if (centerValue != (byte)0x00) {
-                throw new IllegalStateException(
-                    "Frame generation error: center of block should be black (0x00), was: 0x"
-                    + String.format("%02X", centerValue & 0xFF));
-            }
-            
-            doPartial(driver, overlayB1, "centre block — solid black");
-            sleepWithProgress(4_000, "observe step 3");
-
-            // ── Step 4: PARTIAL — hollow the block (create a frame) ──────────
-            // Erase the interior of the block to white, leaving a black border.
-            // Tests a second consecutive partial update on the same region.
-            banner("Step 4: PARTIAL refresh — hollow centre block (black border, white interior)");
-            log.info("OBSERVE (landscape): centre block becomes a black-bordered rectangle with white interior");
-            byte[] overlayB2 = overlayB1.clone();
-            whiteBlock(overlayB2, CENTER_ROW - INNER_HALF_ROWS, INNER_HALF_ROWS * 2,
-                                  CENTER_BYTE - INNER_HALF_BYTES, INNER_HALF_BYTES * 2);
-            doPartial(driver, overlayB2, "centre block — hollow (frame)");
-            sleepWithProgress(4_000, "observe step 4");
-
-            // ── Step 5: FAST — checker ────────────────────────────────────────
-            // Switch to 8×8 checker without a white flash. Tests FAST after
-            // two consecutive PARTIAL refreshes.
-            banner("Step 5: FAST refresh — shape C (8×8 checker)");
-            log.info("OBSERVE (landscape): fine 8×8 checker pattern replaces stripes, no white flash");
-            byte[] checker = shapeC();
-            doFast(driver, checker, "shape C — checker");
-            sleepWithProgress(4_000, "observe step 5");
-
-            // ── Step 6: PARTIAL — solid white centre window ───────────────────
-            // Paint a solid white rectangle in the centre of the checker.
-            // The white "window" on the checker background is clearly visible.
-            banner("Step 6: PARTIAL refresh — white centre window on checker");
-            log.info("OBSERVE (landscape): solid white rectangle appears in centre; checker unchanged around it");
-            byte[] overlayC1 = checker.clone();
-            
-            int whiteBlockStartRow = CENTER_ROW - BLOCK_HALF_ROWS;
-            int whiteBlockNumRows = BLOCK_HALF_ROWS * 2;
-            int whiteBlockStartByte = CENTER_BYTE - BLOCK_HALF_BYTES;
-            int whiteBlockNumBytes = BLOCK_HALF_BYTES * 2;
-            log.info("Step 6 white block: rows [{}, {}), bytes [{}, {})",
-                whiteBlockStartRow, whiteBlockStartRow + whiteBlockNumRows,
-                whiteBlockStartByte, whiteBlockStartByte + whiteBlockNumBytes);
-            
-            whiteBlock(overlayC1, whiteBlockStartRow, whiteBlockNumRows, 
-                       whiteBlockStartByte, whiteBlockNumBytes);
-            
-            // Verify the white block was filled correctly
-            int whiteCenterOffset = CENTER_ROW * ROW_BYTES + CENTER_BYTE;
-            byte whiteCenterValue = overlayC1[whiteCenterOffset];
-            log.info("Step 6 verification: center byte (row={}, byte={}, offset={}) = 0x{} (expect 0xFF)",
-                CENTER_ROW, CENTER_BYTE, whiteCenterOffset, String.format("%02X", whiteCenterValue & 0xFF));
-            if (whiteCenterValue != (byte)0xFF) {
-                throw new IllegalStateException(
-                    "Frame generation error: center of white block should be white (0xFF), was: 0x"
-                    + String.format("%02X", whiteCenterValue & 0xFF));
-            }
-            
-            doPartial(driver, overlayC1, "centre window — white on checker");
-            sleepWithProgress(4_000, "observe step 6");
-
-            // ── Step 7: PARTIAL — black icon inside white window ──────────────
-            // Draw a smaller solid black rectangle inside the white window.
-            // Demonstrates a second partial update composing on top of step 6.
-            banner("Step 7: PARTIAL refresh — black icon inside white window");
-            log.info("OBSERVE (landscape): small solid black rectangle appears inside the white window");
-            byte[] overlayC2 = overlayC1.clone();
-            solidBlock(overlayC2, CENTER_ROW - INNER_HALF_ROWS, INNER_HALF_ROWS * 2,
-                                  CENTER_BYTE - INNER_HALF_BYTES, INNER_HALF_BYTES * 2);
-            doPartial(driver, overlayC2, "icon — black inside white window");
-            sleepWithProgress(4_000, "observe step 7");
-
-            // ── Final: FULL clear — all white ────────────────────────────────
-            // WaveShare recommend not leaving pixels set when the display goes
-            // to sleep, as sustained pixel states can cause long-term burn-in.
-            banner("Final: FULL refresh — all white (screen clear before sleep)");
-            log.info("OBSERVE (landscape): panel flashes and clears to solid white");
-            doFull(driver, allWhite(), "all-white screen clear");
-            sleepWithProgress(2_000, "observe final clear");
-
-            banner("SLEEP & SHUTDOWN");
-            driver.sleep();
-            log.info("DisplaySmokeTest: PASS — all 7 steps completed without exception");
         } catch (Exception e) {
             log.error("DisplaySmokeTest: FAILED with exception", e);
             throw e;
